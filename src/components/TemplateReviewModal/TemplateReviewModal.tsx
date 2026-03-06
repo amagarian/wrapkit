@@ -29,16 +29,19 @@ interface TemplateReviewModalProps {
   onFieldChange: (fieldId: string, updates: Partial<TemplateField>) => void;
   onDeleteField: (fieldId: string) => void;
   onAddField: () => void;
+  onProjectChange?: (updates: Partial<Project>) => void;
 }
 
 export function TemplateReviewModal({
   template,
+  project,
   pdfBytes,
   onClose,
   onSave,
   onFieldChange,
   onDeleteField,
   onAddField,
+  onProjectChange,
 }: TemplateReviewModalProps) {
   const [pageDims, setPageDims] = useState<{ width: number; height: number; scale: number } | null>(null);
   const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
@@ -87,6 +90,12 @@ export function TemplateReviewModal({
                     selected={f.id === selectedFieldId}
                     onSelect={() => setSelectedFieldId(f.id)}
                     onChange={(updates) => onFieldChange(f.id, updates)}
+                    projectValue={f.mappedProjectKey === "creditCardType" && project ? project.creditCardType : undefined}
+                    onCheckboxClick={
+                      f.fieldType === "checkbox" && f.mappedProjectKey === "creditCardType" && onProjectChange
+                        ? (value) => onProjectChange({ creditCardType: value as Project["creditCardType"] })
+                        : undefined
+                    }
                   />
                 ))}
               </div>

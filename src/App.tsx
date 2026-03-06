@@ -362,6 +362,7 @@ export default function App() {
           onFieldChange={handleTemplateFieldChange}
           onDeleteField={handleDeleteField}
           onAddField={handleAddField}
+          onProjectChange={selectedProjectId ? (updates) => updateProject(selectedProjectId, updates) : undefined}
         />
       )}
 

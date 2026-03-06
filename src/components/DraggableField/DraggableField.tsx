@@ -8,6 +8,10 @@ interface DraggableFieldProps {
   selected: boolean;
   onSelect: () => void;
   onChange: (updates: Partial<TemplateField>) => void;
+  /** For checkbox fields: current project value to compare against */
+  projectValue?: string;
+  /** For checkbox fields: callback when checkbox is clicked */
+  onCheckboxClick?: (checkboxValue: string) => void;
 }
 
 type DragMode = 
@@ -22,6 +26,8 @@ export function DraggableField({
   selected,
   onSelect,
   onChange,
+  projectValue,
+  onCheckboxClick,
 }: DraggableFieldProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [dragMode, setDragMode] = useState<DragMode>(null);
@@ -131,18 +137,53 @@ export function DraggableField({
   };
 
   const isCheckbox = field.fieldType === "checkbox";
+  const isChecked = isCheckbox && projectValue === field.checkboxValue;
 
+  // Checkbox fields render as click targets, but can also be dragged when selected
+  if (isCheckbox) {
+    return (
+      <div
+        ref={containerRef}
+        className={`${styles.checkboxField} ${isChecked ? styles.checked : ""} ${selected ? styles.selected : ""} ${dragMode ? styles.dragging : ""}`}
+        style={{
+          left: field.x * scale,
+          top: field.y * scale,
+          width: Math.max(12, field.width * scale),
+          height: Math.max(12, field.height * scale),
+        }}
+        onMouseDown={(e) => {
+          if (selected) {
+            // If already selected, allow dragging
+            startDrag(e, "move");
+          } else {
+            // First click selects and toggles
+            e.stopPropagation();
+            if (onCheckboxClick && field.checkboxValue) {
+              onCheckboxClick(isChecked ? "" : field.checkboxValue);
+            }
+            onSelect();
+          }
+        }}
+        title={selected 
+          ? `Drag to reposition ${field.checkboxValue}` 
+          : `Click to select ${field.checkboxValue}${isChecked ? " (currently selected)" : ""}`
+        }
+      >
+        {isChecked && <span className={styles.checkmark}>✓</span>}
+      </div>
+    );
+  }
+
+  // Text fields render with drag/resize handles
   return (
     <div
       ref={containerRef}
-      className={`${styles.field} ${selected ? styles.selected : ""} ${dragMode ? styles.dragging : ""} ${isCheckbox ? styles.checkbox : ""}`}
+      className={`${styles.field} ${selected ? styles.selected : ""} ${dragMode ? styles.dragging : ""}`}
       style={scaledStyle}
       onMouseDown={handleFieldMouseDown}
-      title={`${field.label}${isCheckbox ? ` (checkbox: ${field.checkboxValue})` : ""} — drag to move`}
+      title={`${field.label} — drag to move`}
     >
-      <span className={styles.label}>
-        {isCheckbox ? `☐ ${field.checkboxValue}` : field.label}
-      </span>
+      <span className={styles.label}>{field.label}</span>
       
       {/* Corner handles */}
       <div
