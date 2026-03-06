@@ -48,11 +48,11 @@ const LABEL_TO_PROJECT_KEY: Record<string, keyof Project> = {
   "job no": "jobNumber",
   "job no.": "jobNumber",
   
-  // PO Number (maps to jobNumber for now, but could be separate field)
-  "po number": "jobNumber",
-  "po #": "jobNumber",
-  "po no": "jobNumber",
-  "po no.": "jobNumber",
+  // PO Number
+  "po number": "poNumber",
+  "po #": "poNumber",
+  "po no": "poNumber",
+  "po no.": "poNumber",
   
   // Address
   "credit card billing address": "billingAddress",
@@ -132,16 +132,33 @@ function findBestMatch(labelText: string): keyof Project | null {
 
 function isLikelyFormLabel(text: string): boolean {
   const trimmed = text.trim();
-  // Labels often end with colon or underscore
-  if (trimmed.endsWith(":") || trimmed.endsWith("_")) return true;
-  // Contains underscores (fill line)
-  if (trimmed.includes("_")) return true;
-  // Ends with period (like "Job No." or "PO No.")
-  if (trimmed.endsWith(".") && trimmed.length < 20) return true;
-  // Short text that matches our known labels
-  if (trimmed.length < 35 && findBestMatch(trimmed)) return true;
-  // Short text followed by colon pattern (covers most form labels)
-  if (trimmed.length < 25) return true;
+  
+  // Skip very short or very long text
+  if (trimmed.length < 3 || trimmed.length > 50) return false;
+  
+  // Skip text that looks like body content
+  const lowerText = trimmed.toLowerCase();
+  if (lowerText.includes("hereby") || lowerText.includes("agree")) return false;
+  if (lowerText.includes("please") || lowerText.includes("must be")) return false;
+  if (lowerText.includes("authorized") || lowerText.includes("responsible")) return false;
+  if (lowerText.includes("outstanding") || lowerText.includes("balance")) return false;
+  if (lowerText.includes("signing") || lowerText.includes("request")) return false;
+  if (lowerText.includes("may ") || lowerText.includes("will be")) return false;
+  
+  // Only consider labels that:
+  // 1. Match a known field pattern, OR
+  // 2. End with colon and are short, OR
+  // 3. Contain underscores (fill line markers)
+  
+  // Must match a known label pattern
+  if (findBestMatch(trimmed)) return true;
+  
+  // Labels ending with colon (e.g., "Name:")
+  if (trimmed.endsWith(":") && trimmed.length < 30) return true;
+  
+  // Contains underscores (fill lines like "Name: ________")
+  if (trimmed.includes("__")) return true;
+  
   return false;
 }
 
@@ -254,10 +271,10 @@ export async function detectFieldsFromPdf(
         
         const { label: cleanLabel, underlineStart } = extractLabelOnly(subField);
         const projectKey = findBestMatch(subField);
-        const finalProjectKey = projectKey && !usedKeys.has(projectKey) ? projectKey : "";
-        if (projectKey && !usedKeys.has(projectKey)) {
-          usedKeys.add(projectKey);
-        }
+        
+        // Skip if no valid mapping or already used
+        if (!projectKey || usedKeys.has(projectKey)) continue;
+        usedKeys.add(projectKey);
         
         let fieldX: number;
         let fieldWidth: number;
@@ -274,13 +291,13 @@ export async function detectFieldsFromPdf(
         fields.push({
           id: `detected-${fieldId++}`,
           label: cleanLabel || subField.slice(0, 15),
-          mappedProjectKey: finalProjectKey,
+          mappedProjectKey: projectKey,
           pageNumber: label.pageNumber,
           x: Math.round(fieldX),
           y: Math.round(label.y),
           width: Math.round(fieldWidth),
           height: Math.round(Math.max(12, label.height)),
-          confidence: finalProjectKey ? 0.7 : 0.5,
+          confidence: 0.7,
           fieldType: "text",
         });
       }
@@ -289,12 +306,10 @@ export async function detectFieldsFromPdf(
     
     const projectKey = findBestMatch(label.text);
     
-    // Allow fields even without a project key match, or if key is already used
-    // User can manually map them later
-    const finalProjectKey = projectKey && !usedKeys.has(projectKey) ? projectKey : "";
-    if (projectKey && !usedKeys.has(projectKey)) {
-      usedKeys.add(projectKey);
-    }
+    // Only create fields for recognized labels that haven't been used yet
+    // Skip duplicates and unrecognized text to avoid clutter
+    if (!projectKey || usedKeys.has(projectKey)) continue;
+    usedKeys.add(projectKey);
     
     // Extract the actual label text and find where underscores start
     const { label: cleanLabel, underlineStart } = extractLabelOnly(label.text);
@@ -341,13 +356,13 @@ export async function detectFieldsFromPdf(
     fields.push({
       id: `detected-${fieldId++}`,
       label: cleanLabel || label.text.slice(0, 20),
-      mappedProjectKey: finalProjectKey,
+      mappedProjectKey: projectKey,
       pageNumber: label.pageNumber,
       x: Math.round(fieldX),
       y: Math.round(fieldY),
       width: Math.round(fieldWidth),
       height: Math.round(fieldHeight),
-      confidence: finalProjectKey ? 0.75 + Math.random() * 0.2 : 0.5,
+      confidence: 0.75 + Math.random() * 0.2,
       fieldType: "text",
     });
   }
@@ -439,27 +454,6 @@ export async function detectFieldsFromPdf(
       }
     }
   }
-  
-  console.log("Detected card types:", Array.from(addedCardTypes));
-  
-  // Debug: log all detected text fields
-  const textFields = fields.filter(f => f.fieldType === "text" || !f.fieldType);
-  console.log("Text fields:", textFields.map(f => ({
-    label: f.label,
-    key: f.mappedProjectKey,
-    x: f.x,
-    y: f.y,
-    width: f.width
-  })));
-  
-  // Debug: log checkbox fields
-  const checkboxFields = fields.filter(f => f.fieldType === "checkbox");
-  console.log("Checkbox fields:", checkboxFields.map(f => ({
-    label: f.label,
-    value: f.checkboxValue,
-    x: f.x,
-    y: f.y
-  })));
   
   // Sort fields top to bottom, then left to right
   fields.sort((a, b) => {

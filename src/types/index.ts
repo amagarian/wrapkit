@@ -12,6 +12,7 @@ export interface Project {
   label: string;
   jobName: string;
   jobNumber: string;
+  poNumber: string;
   productionCompany: string;
   billingAddress: string;
   producer: string;

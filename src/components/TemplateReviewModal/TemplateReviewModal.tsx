@@ -8,6 +8,7 @@ const PROJECT_KEY_LABELS: Record<string, string> = {
   label: "Project label",
   jobName: "Job name",
   jobNumber: "Job number",
+  poNumber: "PO number",
   productionCompany: "Production company",
   billingAddress: "Billing address",
   producer: "Producer",

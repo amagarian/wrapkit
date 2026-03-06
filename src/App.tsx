@@ -26,6 +26,7 @@ function createEmptyProject(): Project {
     label: "",
     jobName: "",
     jobNumber: "",
+    poNumber: "",
     productionCompany: "",
     billingAddress: "",
     producer: "",

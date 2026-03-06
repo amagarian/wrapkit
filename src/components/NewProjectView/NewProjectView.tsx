@@ -20,6 +20,7 @@ export function NewProjectView({
     label: "",
     jobName: "",
     jobNumber: "",
+    poNumber: "",
     productionCompany: "",
     billingAddress: "",
     producer: "",

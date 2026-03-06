@@ -10,6 +10,7 @@ const TEXT_FIELDS: { key: keyof Project; label: string }[] = [
   { key: "label", label: "Project label" },
   { key: "jobName", label: "Job name" },
   { key: "jobNumber", label: "Job number" },
+  { key: "poNumber", label: "PO number" },
   { key: "productionCompany", label: "Production company" },
   { key: "billingAddress", label: "Billing address" },
   { key: "producer", label: "Producer" },
