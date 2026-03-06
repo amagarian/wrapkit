@@ -1,0 +1,48 @@
+.list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 0;
+}
+
+.label {
+  padding: 0 16px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.items li {
+  margin: 0;
+}
+
+.item,
+.itemActive {
+  display: block;
+  width: 100%;
+  padding: 10px 16px;
+  text-align: left;
+  border: none;
+  background: none;
+  color: var(--text);
+  font-size: 14px;
+  border-radius: 0;
+  border-left: 3px solid transparent;
+}
+
+.item:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.itemActive {
+  background: rgba(0, 0, 0, 0.06);
+  border-left-color: var(--text);
+  font-weight: 500;
+}
