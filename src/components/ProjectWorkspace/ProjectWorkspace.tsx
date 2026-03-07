@@ -1,67 +1,94 @@
-import type { Project, PdfMatchResult } from "@/types";
-import { ProjectDetailForm } from "../ProjectDetailForm/ProjectDetailForm";
+import type { Project, ProjectDocument } from "@/types";
 import { PdfDropzone } from "../PdfDropzone/PdfDropzone";
-import { MatchStatusPanel } from "../MatchStatusPanel/MatchStatusPanel";
+import { DocumentList } from "../DocumentList/DocumentList";
 import styles from "./ProjectWorkspace.module.css";
 
 interface ProjectWorkspaceProps {
   project: Project | null;
-  matchResult: PdfMatchResult | null;
+  documents: ProjectDocument[];
   onPdfDrop: (file: File | null) => void;
-  onUpdateProject: (updates: Partial<Project>) => void;
-  onOpenTemplateReview: (draftTemplateId: string) => void;
-  onFillNow: (templateId: string) => void;
-  onPreviewBeforeExport: (templateId: string) => void;
-  onChoosePossibleMatch: (templateId: string) => void;
-  onCreateNewTemplate: () => void;
-  onClearMatch: () => void;
-  onEditTemplate: (templateId: string) => void;
+  onEditProject: () => void;
+  onDeleteProject: () => void;
+  onOpenDocument: (doc: ProjectDocument) => void;
+  onFillDocument: (doc: ProjectDocument) => void;
+  onPreviewDocument: (doc: ProjectDocument) => void;
+  onRemoveDocument: (docId: string) => void;
 }
+
+const SUMMARY_FIELDS: { key: keyof Project; label: string }[] = [
+  { key: "jobName", label: "JOB NAME" },
+  { key: "jobNumber", label: "JOB NO." },
+  { key: "productionCompany", label: "COMPANY" },
+];
 
 export function ProjectWorkspace({
   project,
-  matchResult,
+  documents,
   onPdfDrop,
-  onUpdateProject,
-  onOpenTemplateReview,
-  onFillNow,
-  onPreviewBeforeExport,
-  onChoosePossibleMatch,
-  onCreateNewTemplate,
-  onClearMatch,
-  onEditTemplate,
+  onEditProject,
+  onDeleteProject,
+  onOpenDocument,
+  onFillDocument,
+  onPreviewDocument,
+  onRemoveDocument,
 }: ProjectWorkspaceProps) {
+  if (!project) {
+    return (
+      <div className={styles.empty}>
+        <p className={styles.emptyText}>Select a project from the sidebar.</p>
+      </div>
+    );
+  }
+
   return (
     <div className={styles.workspace}>
-      <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>Project details</h2>
-        {project ? (
-          <ProjectDetailForm
-            project={project}
-            onChange={onUpdateProject}
-          />
-        ) : (
-          <p className={styles.placeholder}>Select a project from the sidebar.</p>
-        )}
-      </section>
+      <div className={styles.summaryHeader}>
+        <h2 className={styles.summaryTitle}>JOB INFO</h2>
+        <div className={styles.headerActions}>
+          <button type="button" className={styles.editBtn} onClick={onEditProject} title="Edit project">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
+          </button>
+          <button
+            type="button"
+            className={styles.deleteBtn}
+            onClick={() => {
+              if (window.confirm("Delete this project? This cannot be undone.")) {
+                onDeleteProject();
+              }
+            }}
+            title="Delete project"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+          </button>
+        </div>
+      </div>
 
-      <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>PDF intake</h2>
-        {matchResult ? (
-          <MatchStatusPanel
-            result={matchResult}
-            onOpenTemplateReview={onOpenTemplateReview}
-            onFillNow={onFillNow}
-            onPreviewBeforeExport={onPreviewBeforeExport}
-            onChoosePossibleMatch={onChoosePossibleMatch}
-            onCreateNewTemplate={onCreateNewTemplate}
-            onClearMatch={onClearMatch}
-            onEditTemplate={onEditTemplate}
-          />
-        ) : (
-          <PdfDropzone onDrop={onPdfDrop} />
-        )}
-      </section>
+      <div className={styles.summaryGrid}>
+        {SUMMARY_FIELDS.map(({ key, label }) => {
+          const value = project[key];
+          if (!value) return null;
+          return (
+            <div key={key} className={styles.summaryField}>
+              <span className={styles.summaryLabel}>{label}</span>
+              <span className={styles.summaryValue}>{String(value)}</span>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className={styles.documentsSection}>
+        <DocumentList
+          documents={documents}
+          onOpen={onOpenDocument}
+          onFill={onFillDocument}
+          onPreview={onPreviewDocument}
+          onRemove={onRemoveDocument}
+        />
+      </div>
+
+      <div className={styles.dropSection}>
+        <PdfDropzone onDrop={onPdfDrop} />
+      </div>
     </div>
   );
 }

@@ -1,11 +1,15 @@
+import { useState, useEffect } from "react";
 import type { Project, Template } from "@/types";
-import type { FilledField } from "@/utils/fill";
+import type { PromptFieldValues } from "@/utils/fill";
+import { writeFilledPdfBytes } from "@/utils/pdfWriter";
+import { PdfPageCanvas } from "../PdfPageCanvas/PdfPageCanvas";
 import styles from "./PreviewExportModal.module.css";
 
 interface PreviewExportModalProps {
   template: Template;
   project: Project;
-  filledFields: FilledField[];
+  sourceBytes: Uint8Array;
+  promptValues?: PromptFieldValues;
   fileName?: string;
   onClose: () => void;
   onExport: () => void;
@@ -15,14 +19,44 @@ interface PreviewExportModalProps {
 export function PreviewExportModal({
   template,
   project,
-  filledFields,
+  sourceBytes,
+  promptValues = {},
   fileName,
   onClose,
   onExport,
   exportLabel = "Export PDF",
 }: PreviewExportModalProps) {
-  const formatMappedKey = (key: FilledField["mappedProjectKey"]) =>
-    key === "__custom__" ? "Custom value" : key === "__prompt__" ? "Prompt at fill time" : key || "—";
+  const [filledBytes, setFilledBytes] = useState<Uint8Array | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [pageCount, setPageCount] = useState(1);
+  const [currentPage, setCurrentPage] = useState(1);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function generate() {
+      try {
+        const bytes = await writeFilledPdfBytes(sourceBytes, template, project, {
+          defaultFontSize: 10,
+          promptValues,
+        });
+        if (cancelled) return;
+        setFilledBytes(bytes);
+
+        const pdfjsLib = await import("pdfjs-dist");
+        const doc = await pdfjsLib.getDocument({ data: new Uint8Array(bytes) }).promise;
+        if (!cancelled) setPageCount(doc.numPages);
+      } catch (err) {
+        if (!cancelled) {
+          console.error("Preview generation failed:", err);
+          setError(err instanceof Error ? err.message : "Failed to generate preview");
+        }
+      }
+    }
+
+    void generate();
+    return () => { cancelled = true; };
+  }, [sourceBytes, template, project, promptValues]);
 
   return (
     <div className={styles.overlay} role="dialog" aria-modal="true" aria-labelledby="preview-modal-title">
@@ -31,32 +65,58 @@ export function PreviewExportModal({
         <header className={styles.header}>
           <div>
             <h2 id="preview-modal-title" className={styles.title}>
-              Preview before export
+              Preview
             </h2>
             <p className={styles.subtitle}>
-              {fileName ?? "document.pdf"} · {template.name} · {project.label || project.jobName || "Untitled project"}
+              {fileName ?? "document.pdf"} · {project.jobName || project.label || "Untitled project"}
             </p>
           </div>
           <button type="button" className={styles.closeBtn} onClick={onClose} aria-label="Close">
-            ×
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
           </button>
         </header>
 
         <div className={styles.body}>
-          <div className={styles.tableHeader}>
-            <span>Field</span>
-            <span>Mapped key</span>
-            <span>Value</span>
-          </div>
-          <div className={styles.rows}>
-            {filledFields.map((f) => (
-              <div key={f.fieldId} className={styles.row}>
-                <span className={styles.fieldLabel}>{f.label}</span>
-                <span className={styles.mappedKey}>{formatMappedKey(f.mappedProjectKey)}</span>
-                <span className={styles.value}>{f.value || "—"}</span>
-              </div>
-            ))}
-          </div>
+          {error && <p className={styles.error}>{error}</p>}
+
+          {!error && !filledBytes && (
+            <div className={styles.generating}>Generating preview…</div>
+          )}
+
+          {filledBytes && (
+            <div className={styles.pdfContainer}>
+              <PdfPageCanvas
+                pdfBytes={filledBytes}
+                pageNumber={currentPage}
+                maxWidth={700}
+                maxHeight={600}
+              />
+            </div>
+          )}
+
+          {pageCount > 1 && (
+            <div className={styles.pager}>
+              <button
+                type="button"
+                className={styles.pageBtn}
+                disabled={currentPage <= 1}
+                onClick={() => setCurrentPage((p) => p - 1)}
+              >
+                ‹ Prev
+              </button>
+              <span className={styles.pageInfo}>
+                Page {currentPage} of {pageCount}
+              </span>
+              <button
+                type="button"
+                className={styles.pageBtn}
+                disabled={currentPage >= pageCount}
+                onClick={() => setCurrentPage((p) => p + 1)}
+              >
+                Next ›
+              </button>
+            </div>
+          )}
         </div>
 
         <footer className={styles.footer}>
@@ -71,4 +131,3 @@ export function PreviewExportModal({
     </div>
   );
 }
-

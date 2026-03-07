@@ -66,6 +66,8 @@ export interface Project {
   authorizationDate: string;
   productionCompany: string;
   billingAddress: string;
+  billingCity: string;
+  billingState: string;
   billingZipCode: string;
   producer: string;
   email: string;
@@ -217,6 +219,20 @@ export interface TemplateSubmission {
   sourcePdfPath?: string;
   submittedAt: string;
   notes?: string;
+}
+
+export type ProjectDocumentStatus = "pending" | "matched" | "filled";
+
+export interface ProjectDocument {
+  id: string;
+  projectId: string;
+  fileName: string;
+  templateId?: string;
+  matchResult?: PdfMatchResult;
+  pdfBytes?: Uint8Array;
+  status: ProjectDocumentStatus;
+  createdAt: string;
+  updatedAt: string;
 }
 
 /** Result of attempting to match an uploaded PDF to a template */

@@ -24,8 +24,9 @@ export function NewProjectView({
     authorizationDate: "",
     productionCompany: "",
     billingAddress: "",
+    billingCity: "",
+    billingState: "",
     billingZipCode: "",
-    producer: "",
     email: "",
     phone: "",
     creditCardType: "",
@@ -43,8 +44,10 @@ export function NewProjectView({
   return (
     <div className={styles.wrapper}>
       <div className={styles.header}>
-        <h2 className={styles.title}>New project</h2>
-        <p className={styles.subtitle}>Create a new job to use with PDF templates.</p>
+        <h2 className={styles.title}>JOB INFO</h2>
+        <button type="button" className={styles.closeBtn} onClick={onCancel} aria-label="Close" title="Cancel">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
+        </button>
       </div>
       <ProjectDetailForm project={project} onChange={onChange} />
       <div className={styles.actions}>

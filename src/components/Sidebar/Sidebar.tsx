@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { ProjectList } from "../ProjectList/ProjectList";
 import styles from "./Sidebar.module.css";
 
@@ -9,19 +10,33 @@ interface SidebarProps {
 }
 
 export function Sidebar({ projects, selectedId, onSelect, onNewProject }: SidebarProps) {
+  const [search, setSearch] = useState("");
+
+  const filtered = search.trim()
+    ? projects.filter((p) => p.label.toLowerCase().includes(search.toLowerCase()))
+    : projects;
+
   return (
     <aside className={styles.sidebar}>
-      <div className={styles.header}>
-        <h1 className={styles.logo}>Wrapkit</h1>
-        <button type="button" className={styles.newBtn} onClick={onNewProject}>
-          New project
-        </button>
+      <div className={styles.searchRow}>
+        <input
+          type="text"
+          className={styles.searchInput}
+          placeholder="Search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
       </div>
       <ProjectList
-        projects={projects}
+        projects={filtered}
         selectedId={selectedId}
         onSelect={onSelect}
       />
+      <div className={styles.footer}>
+        <button type="button" className={styles.addBtn} onClick={onNewProject} title="New project">
+          +
+        </button>
+      </div>
     </aside>
   );
 }

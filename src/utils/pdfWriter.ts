@@ -10,9 +10,16 @@ function isCheckboxField(field: TemplateField): boolean {
   );
 }
 
+function isSignatureField(field: TemplateField): boolean {
+  return (
+    field.mappedProjectKey === "cardholderSignature" ||
+    field.fieldKind === "signature"
+  );
+}
+
 function fitTextToWidth(text: string, width: number, font: any, fontSize: number): string {
   if (!text) return "";
-  const maxWidth = Math.max(0, width - 6); // padding
+  const maxWidth = Math.max(0, width - 6);
   if (maxWidth <= 0) return text;
   if (font.widthOfTextAtSize(text, fontSize) <= maxWidth) return text;
 
@@ -30,15 +37,10 @@ function fitTextToWidth(text: string, width: number, font: any, fontSize: number
 }
 
 export interface WritePdfOptions {
-  /** Default font size used when field height is unknown/too small. */
   defaultFontSize?: number;
   promptValues?: PromptFieldValues;
 }
 
-/**
- * Writes project values onto an existing (possibly flat) PDF using positioned template fields.
- * Coordinates are interpreted as top-left origin values (UI-style), then converted to PDF-space.
- */
 export async function writeFilledPdfBytes(
   sourcePdfBytes: Uint8Array,
   template: Template,
@@ -48,6 +50,7 @@ export async function writeFilledPdfBytes(
   const pdfDoc = await PDFDocument.load(sourcePdfBytes);
   const pages = pdfDoc.getPages();
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const signatureFont = await pdfDoc.embedFont(StandardFonts.TimesRomanItalic);
 
   const defaultFontSize = options.defaultFontSize ?? 10;
   const promptValues = options.promptValues ?? {};
@@ -60,27 +63,42 @@ export async function writeFilledPdfBytes(
     const rawValue = getTemplateFieldValue(project, field, promptValues);
     if (!rawValue) continue;
 
-    // Interpret template coords as top-left origin (like the editor overlay).
     const x = field.x;
     const yPdfBottom = pageHeight - (field.y + field.height);
 
     if (isCheckboxField(field)) {
-      // For checkbox-like fields, check if the project value matches this box's selected value.
       if (field.checkboxValue && rawValue === field.checkboxValue) {
-        const checkSize = Math.min(field.width, field.height) * 0.8;
-        const centerX = x + field.width / 2;
-        const centerY = yPdfBottom + field.height / 2;
+        const s = Math.min(field.width, field.height) * 0.7;
+        const cx = x + field.width / 2;
+        const cy = yPdfBottom + field.height / 2;
+        const color = rgb(0.1, 0.1, 0.1);
+        const thickness = Math.max(1.2, s * 0.15);
 
-        page.drawText("✓", {
-          x: centerX - checkSize / 3,
-          y: centerY - checkSize / 3,
-          size: checkSize,
-          font,
-          color: rgb(0.1, 0.1, 0.1),
+        page.drawLine({
+          start: { x: cx - s / 2, y: cy },
+          end: { x: cx - s / 6, y: cy - s / 2.5 },
+          thickness,
+          color,
+        });
+        page.drawLine({
+          start: { x: cx - s / 6, y: cy - s / 2.5 },
+          end: { x: cx + s / 2, y: cy + s / 2.5 },
+          thickness,
+          color,
         });
       }
+    } else if (isSignatureField(field)) {
+      const sigFontSize = Math.max(10, Math.min(20, Math.floor(field.height * 0.85)));
+      const value = fitTextToWidth(rawValue, field.width, signatureFont, sigFontSize);
+
+      page.drawText(value, {
+        x: x + 3,
+        y: yPdfBottom + Math.max(2, (field.height - sigFontSize) / 2),
+        size: sigFontSize,
+        font: signatureFont,
+        color: rgb(0.08, 0.08, 0.08),
+      });
     } else {
-      // Text field
       let fontSize = defaultFontSize;
       if (field.height > 0) {
         fontSize = Math.max(7, Math.min(12, Math.floor(field.height * 0.75)));
@@ -101,4 +119,3 @@ export async function writeFilledPdfBytes(
   const bytes = await pdfDoc.save();
   return bytes;
 }
-

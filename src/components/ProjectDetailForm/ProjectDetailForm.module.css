@@ -1,36 +1,90 @@
 .form {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px 24px;
-  max-width: 720px;
-}
-
-.row {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 0;
 }
 
-.label {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-muted);
+.group {
+  display: contents;
+}
+
+.field {
+  position: relative;
 }
 
 .input {
-  padding: 8px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-panel);
+  display: block;
+  width: 100%;
+  padding: 14px 16px 6px;
+  background: var(--bg-input);
+  border: none;
+  border-bottom: 1px solid var(--border);
   color: var(--text);
+  font-size: 13px;
+  outline: none;
+  transition: background 0.15s;
 }
 
 .input:focus {
-  outline: none;
-  border-color: var(--border-focus);
+  background: #e0e0de;
 }
 
 .input::placeholder {
-  color: var(--text-muted);
-  opacity: 0.7;
+  color: transparent;
+}
+
+.label {
+  position: absolute;
+  top: 4px;
+  left: 16px;
+  font-size: 9px;
+  font-weight: var(--header-uppercase);
+  text-transform: uppercase;
+  letter-spacing: var(--letter-wide);
+  color: var(--text-label);
+  pointer-events: none;
+}
+
+select.input {
+  appearance: none;
+  cursor: pointer;
+  padding-right: 32px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b6b69' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+}
+
+.signatureInput {
+  composes: input;
+  font-family: var(--font-signature);
+  font-size: 22px;
+  padding-top: 10px;
+  padding-bottom: 2px;
+  line-height: 1;
+}
+
+.checkboxRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: var(--bg-input);
+  border-bottom: 1px solid var(--border);
+}
+
+.checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--text);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.checkboxLabel {
+  font-size: 9px;
+  font-weight: var(--header-uppercase);
+  text-transform: uppercase;
+  letter-spacing: var(--letter-wide);
+  color: var(--text-label);
+  cursor: pointer;
 }

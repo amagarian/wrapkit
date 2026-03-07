@@ -6,24 +6,21 @@ import { getTemplateFieldValue } from "@/utils/fill";
 import styles from "./TemplateReviewModal.module.css";
 
 const PROJECT_KEY_LABELS: Record<string, string> = {
-  label: "Project label",
   jobName: "Job name",
   jobNumber: "Job number",
-  poNumber: "PO number",
-  authorizationDate: "Authorization date",
   productionCompany: "Production company",
   billingAddress: "Billing address",
-  billingZipCode: "Billing zip code",
-  producer: "Producer",
+  creditCardHolder: "Name",
   email: "Email",
   phone: "Phone",
   creditCardType: "Credit card type",
-  keepCardOnFile: "Keep card on file",
-  creditCardHolder: "Credit card holder",
-  cardholderSignature: "Cardholder signature",
-  creditCardNumber: "Credit card number",
+  creditCardNumber: "Card number",
   expDate: "Exp date",
   ccv: "CCV",
+  billingZipCode: "Billing zip code",
+  cardholderSignature: "Signature",
+  keepCardOnFile: "Keep card on file",
+  authorizationDate: "Authorization date",
 };
 
 const CHECKBOX_VALUE_LABELS: Record<string, string> = {
@@ -69,6 +66,7 @@ interface TemplateReviewModalProps {
   pdfBytes?: Uint8Array | null;
   onClose: () => void;
   onSave: (template: Template) => void;
+  onConfirm: (template: Template) => void;
   onSubmitForVerification: (template: Template) => void;
   onUndo: () => void;
   canUndo: boolean;
@@ -88,6 +86,7 @@ export function TemplateReviewModal({
   pdfBytes,
   onClose,
   onSave,
+  onConfirm,
   onSubmitForVerification,
   onUndo,
   canUndo,
@@ -366,6 +365,13 @@ export function TemplateReviewModal({
             onClick={() => onSave(template)}
           >
             {saveLabel}
+          </button>
+          <button
+            type="button"
+            className={styles.confirmBtn}
+            onClick={() => onConfirm(template)}
+          >
+            Confirm
           </button>
         </footer>
       </div>

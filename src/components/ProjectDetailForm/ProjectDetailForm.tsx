@@ -4,25 +4,25 @@ import styles from "./ProjectDetailForm.module.css";
 interface ProjectDetailFormProps {
   project: Project;
   onChange: (updates: Partial<Project>) => void;
+  readOnly?: boolean;
 }
 
 const TEXT_FIELDS: { key: keyof Project; label: string }[] = [
-  { key: "label", label: "Project label" },
-  { key: "jobName", label: "Job name" },
-  { key: "jobNumber", label: "Job number" },
-  { key: "poNumber", label: "PO number" },
-  { key: "authorizationDate", label: "Authorization date" },
-  { key: "productionCompany", label: "Production company" },
-  { key: "billingAddress", label: "Billing address" },
-  { key: "billingZipCode", label: "Billing zip code" },
-  { key: "producer", label: "Producer" },
-  { key: "email", label: "Email" },
-  { key: "phone", label: "Phone" },
-  { key: "creditCardHolder", label: "Credit card holder" },
-  { key: "cardholderSignature", label: "Cardholder signature" },
-  { key: "creditCardNumber", label: "Credit card number" },
-  { key: "expDate", label: "Exp date" },
+  { key: "jobName", label: "JOB NAME" },
+  { key: "jobNumber", label: "JOB NUMBER" },
+  { key: "productionCompany", label: "PRODUCTION COMPANY" },
+  { key: "billingAddress", label: "BILLING ADDRESS" },
+  { key: "creditCardHolder", label: "NAME" },
+  { key: "email", label: "EMAIL" },
+  { key: "phone", label: "PHONE" },
+];
+
+const CARD_FIELDS: { key: keyof Project; label: string }[] = [
+  { key: "creditCardNumber", label: "CARD NUMBER" },
+  { key: "expDate", label: "EXP DATE" },
   { key: "ccv", label: "CCV" },
+  { key: "billingZipCode", label: "BILLING ZIP CODE" },
+  { key: "cardholderSignature", label: "SIGNATURE" },
 ];
 
 const CARD_TYPE_OPTIONS: { value: CreditCardType; label: string }[] = [
@@ -33,76 +33,78 @@ const CARD_TYPE_OPTIONS: { value: CreditCardType; label: string }[] = [
   { value: "amex", label: "American Express" },
 ];
 
-export function ProjectDetailForm({ project, onChange }: ProjectDetailFormProps) {
+export function ProjectDetailForm({ project, onChange, readOnly }: ProjectDetailFormProps) {
   return (
     <div className={styles.form}>
-      {TEXT_FIELDS.map(({ key, label }) => {
-        // Insert credit card type selector before creditCardHolder
-        if (key === "creditCardHolder") {
-          return (
-            <div key="creditCardType-and-holder">
-              <div className={styles.row}>
-                <label className={styles.label} htmlFor="creditCardType">
-                  Credit card type
-                </label>
-                <select
-                  id="creditCardType"
-                  className={styles.input}
-                  value={project.creditCardType || ""}
-                  onChange={(e) => onChange({ creditCardType: e.target.value as CreditCardType })}
-                >
-                  {CARD_TYPE_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className={styles.row}>
-                <label className={styles.label} htmlFor={key}>
-                  {label}
-                </label>
-                <input
-                  id={key}
-                  type="text"
-                  className={styles.input}
-                  value={project[key] as string}
-                  onChange={(e) => onChange({ [key]: e.target.value })}
-                />
-              </div>
-            </div>
-          );
-        }
-        
-        return (
-          <div key={key} className={styles.row}>
-            <label className={styles.label} htmlFor={key}>
-              {label}
-            </label>
-            <input
-              id={key}
-              type="text"
-              className={styles.input}
-              value={project[key] as string}
-              onChange={(e) => onChange({ [key]: e.target.value })}
-            />
-          </div>
-        );
-      })}
-      <div className={styles.row}>
-        <label className={styles.label} htmlFor="keepCardOnFile">
-          Keep card on file
+      {TEXT_FIELDS.map(({ key, label }) => (
+        <div key={key} className={styles.field}>
+          <input
+            id={key}
+            type="text"
+            className={styles.input}
+            value={(project[key] as string) ?? ""}
+            onChange={(e) => onChange({ [key]: e.target.value })}
+            readOnly={readOnly}
+            placeholder=" "
+          />
+          <label className={styles.label} htmlFor={key}>
+            {label}
+          </label>
+        </div>
+      ))}
+
+      <div className={styles.field}>
+        <select
+          id="creditCardType"
+          className={styles.input}
+          value={project.creditCardType || ""}
+          onChange={(e) => onChange({ creditCardType: e.target.value as CreditCardType })}
+          disabled={readOnly}
+        >
+          {CARD_TYPE_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+        <label className={styles.label} htmlFor="creditCardType">
+          CARD TYPE
         </label>
+      </div>
+
+      {CARD_FIELDS.map(({ key, label }) => (
+        <div key={key} className={styles.field}>
+          <input
+            id={key}
+            type="text"
+            className={key === "cardholderSignature" ? styles.signatureInput : styles.input}
+            value={(project[key] as string) ?? ""}
+            onChange={(e) => onChange({ [key]: e.target.value })}
+            readOnly={readOnly}
+            placeholder=" "
+          />
+          <label className={styles.label} htmlFor={key}>
+            {label}
+          </label>
+        </div>
+      ))}
+
+      <div className={styles.checkboxRow}>
         <input
           id="keepCardOnFile"
           type="checkbox"
+          className={styles.checkbox}
           checked={project.keepCardOnFile === "yes"}
           onChange={(e) =>
             onChange({
               keepCardOnFile: (e.target.checked ? "yes" : "") as KeepCardOnFileValue,
             })
           }
+          disabled={readOnly}
         />
+        <label className={styles.checkboxLabel} htmlFor="keepCardOnFile">
+          KEEP CARD ON FILE
+        </label>
       </div>
     </div>
   );

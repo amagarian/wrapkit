@@ -9,7 +9,6 @@ interface ProjectListProps {
 export function ProjectList({ projects, selectedId, onSelect }: ProjectListProps) {
   return (
     <nav className={styles.list} aria-label="Projects">
-      <div className={styles.label}>Projects</div>
       <ul className={styles.items}>
         {projects.map((p) => (
           <li key={p.id}>

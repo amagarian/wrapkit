@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
-import type { Project, PdfMatchResult, Template, TemplateCacheEntry, TemplateField } from "@/types";
+import type { Project, PdfMatchResult, Template, TemplateCacheEntry, TemplateField, ProjectDocument } from "@/types";
 import { mockProjects } from "@/data/mockProjects";
 import { mockDraftTemplate } from "@/data/mockTemplates";
 import { AppShell } from "@/components/AppShell/AppShell";
@@ -8,12 +8,11 @@ import { NewProjectView } from "@/components/NewProjectView/NewProjectView";
 import { TemplateReviewModal } from "@/components/TemplateReviewModal/TemplateReviewModal";
 import { PreviewExportModal } from "@/components/PreviewExportModal/PreviewExportModal";
 import { FillPromptModal } from "@/components/FillPromptModal/FillPromptModal";
+import { MatchStatusModal } from "@/components/MatchStatusModal/MatchStatusModal";
 import { Toast, type ToastState } from "@/components/Toast/Toast";
 import {
-  buildFilledFields,
   getPromptFields,
   getTemplateFieldPromptLabel,
-  type FilledField,
   type PromptFieldValues,
 } from "@/utils/fill";
 import { writeFilledPdfBytes } from "@/utils/pdfWriter";
@@ -27,7 +26,7 @@ import {
 } from "@/services/templateRegistry";
 import { readLocalTemplates, upsertLocalTemplate } from "@/services/templateCache";
 
-type View = "workspace" | "new-project";
+type View = "workspace" | "new-project" | "edit-project";
 
 function createEmptyProject(): Project {
   const now = new Date().toISOString();
@@ -40,6 +39,8 @@ function createEmptyProject(): Project {
     authorizationDate: "",
     productionCompany: "",
     billingAddress: "",
+    billingCity: "",
+    billingState: "",
     billingZipCode: "",
     producer: "",
     email: "",
@@ -109,7 +110,6 @@ export default function App() {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
     mockProjects[0]?.id ?? null
   );
-  const [matchResult, setMatchResult] = useState<PdfMatchResult | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [templateModal, setTemplateModal] = useState<{
     template: Template;
@@ -120,13 +120,15 @@ export default function App() {
   const [editedTemplates, setEditedTemplates] = useState<Record<string, Template>>({});
   const [previewModal, setPreviewModal] = useState<{
     template: Template;
-    filledFields: FilledField[];
     fileName?: string;
     promptValues: PromptFieldValues;
+    sourceBytes: Uint8Array;
   } | null>(null);
   const [fillPromptModal, setFillPromptModal] = useState<{
     template: Template;
     mode: "preview" | "export";
+    sourceBytes: Uint8Array;
+    fileName: string;
   } | null>(null);
   const [pdfSource, setPdfSource] = useState<{
     fileName: string;
@@ -137,10 +139,17 @@ export default function App() {
   const [promptValuesByTemplate, setPromptValuesByTemplate] = useState<
     Record<string, PromptFieldValues>
   >({});
+  const [projectDocuments, setProjectDocuments] = useState<Record<string, ProjectDocument[]>>({});
+  const [activeDocumentId, setActiveDocumentId] = useState<string | null>(null);
+  const [matchModal, setMatchModal] = useState<PdfMatchResult | null>(null);
 
   const selectedProject = selectedProjectId
     ? projects.find((p) => p.id === selectedProjectId) ?? null
     : null;
+
+  const currentDocuments = selectedProjectId
+    ? projectDocuments[selectedProjectId] ?? []
+    : [];
 
   useEffect(() => {
     void (async () => {
@@ -166,17 +175,75 @@ export default function App() {
     );
   }, []);
 
+  const deleteProject = useCallback((id: string) => {
+    setProjects((prev) => prev.filter((p) => p.id !== id));
+    setProjectDocuments((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    if (selectedProjectId === id) {
+      setSelectedProjectId(null);
+      setView("workspace");
+    }
+  }, [selectedProjectId]);
+
+  const addDocumentToProject = useCallback((projectId: string, doc: ProjectDocument) => {
+    setProjectDocuments((prev) => ({
+      ...prev,
+      [projectId]: [...(prev[projectId] ?? []), doc],
+    }));
+  }, []);
+
+  const updateDocumentInProject = useCallback((projectId: string, docId: string, updates: Partial<ProjectDocument>) => {
+    setProjectDocuments((prev) => ({
+      ...prev,
+      [projectId]: (prev[projectId] ?? []).map((d) =>
+        d.id === docId ? { ...d, ...updates, updatedAt: new Date().toISOString() } : d
+      ),
+    }));
+  }, []);
+
+  const removeDocumentFromProject = useCallback((projectId: string, docId: string) => {
+    setProjectDocuments((prev) => ({
+      ...prev,
+      [projectId]: (prev[projectId] ?? []).filter((d) => d.id !== docId),
+    }));
+  }, []);
+
+  const showToast = useCallback((message: string, type: "success" | "error" | "info" = "success") => {
+    setToast({ message, type });
+  }, []);
+
   const handlePdfDrop = useCallback((file: File | null) => {
-    if (!file) return;
+    if (!file || !selectedProjectId) return;
+    const docId = `doc-${Date.now()}`;
+    const now = new Date().toISOString();
+
+    const newDoc: ProjectDocument = {
+      id: docId,
+      projectId: selectedProjectId,
+      fileName: file.name,
+      status: "pending",
+      createdAt: now,
+      updatedAt: now,
+    };
+    addDocumentToProject(selectedProjectId, newDoc);
+    setActiveDocumentId(docId);
+
     void (async () => {
       const bytes = new Uint8Array(await file.arrayBuffer());
       setPdfSource({ fileName: file.name, bytes });
-      setMatchResult({
+
+      updateDocumentInProject(selectedProjectId, docId, { pdfBytes: bytes });
+
+      const initialResult: PdfMatchResult = {
         kind: "none",
         fileName: file.name,
         lookupMessage: "Matching against the verified template registry...",
         syncState: "matching",
-      });
+      };
+      setMatchModal(initialResult);
 
       const registryMatch = await matchVerifiedTemplates(bytes, file.name);
       setRegistryTemplates((prev) => ({
@@ -186,14 +253,19 @@ export default function App() {
 
       if (registryMatch.result.kind === "verified" || registryMatch.result.kind === "possible") {
         setDraftTemplate(null);
-        setMatchResult(registryMatch.result);
-        setToast({
-          message:
-            registryMatch.result.kind === "verified"
-              ? "Found a verified template match."
-              : "Found likely verified templates.",
-          type: "success",
+        const result = registryMatch.result;
+        setMatchModal(result);
+        updateDocumentInProject(selectedProjectId, docId, {
+          status: "matched",
+          matchResult: result,
+          templateId: result.verifiedMatch?.templateId,
         });
+        showToast(
+          result.kind === "verified"
+            ? "Found a verified template match."
+            : "Found likely verified templates.",
+          "success"
+        );
         return;
       }
 
@@ -207,17 +279,20 @@ export default function App() {
           [savedLocalTemplate.id]: savedLocalTemplate,
         }));
         setDraftTemplate(savedLocalTemplate);
-        setMatchResult({
+        const result: PdfMatchResult = {
           ...registryMatch.result,
           draftTemplateId: savedLocalTemplate.id,
           lookupMessage: "Loaded your saved local template for this PDF.",
           matchSource: savedLocalTemplate.source ?? "local-draft",
           syncState: "matched",
+        };
+        setMatchModal(result);
+        updateDocumentInProject(selectedProjectId, docId, {
+          status: "matched",
+          matchResult: result,
+          templateId: savedLocalTemplate.id,
         });
-        setToast({
-          message: "Loaded your saved local template edits.",
-          type: "success",
-        });
+        showToast("Loaded your saved local template edits.", "success");
         return;
       }
 
@@ -235,33 +310,39 @@ export default function App() {
           fingerprint: registryMatch.fingerprint,
         } as Template;
         setDraftTemplate(draft);
-        setMatchResult({
+        const result: PdfMatchResult = {
           ...registryMatch.result,
           draftTemplateId: draft.id,
           syncState: "matched",
+        };
+        setMatchModal(result);
+        updateDocumentInProject(selectedProjectId, docId, {
+          status: "matched",
+          matchResult: result,
+          templateId: draft.id,
         });
-        setToast({
-          message: `Detected ${detectedFields.length} potential field(s) on this PDF`,
-          type: "info",
-        });
+        showToast(`Detected ${detectedFields.length} potential field(s) on this PDF`, "info");
       } else {
         const draft: Template = {
           ...createEmptyDraftTemplate(file.name),
           fingerprint: registryMatch.fingerprint,
         };
         setDraftTemplate(draft);
-        setMatchResult({
+        const result: PdfMatchResult = {
           ...registryMatch.result,
           draftTemplateId: draft.id,
           syncState: "matched",
+        };
+        setMatchModal(result);
+        updateDocumentInProject(selectedProjectId, docId, {
+          status: "matched",
+          matchResult: result,
+          templateId: draft.id,
         });
-        setToast({
-          message: "No recognizable labels found. You can add fields manually.",
-          type: "info",
-        });
+        showToast("No recognizable labels found. You can add fields manually.", "info");
       }
     })();
-  }, []);
+  }, [addDocumentToProject, selectedProjectId, showToast, updateDocumentInProject]);
 
   const getTemplateById = useCallback(
     (templateId: string): Template | null => {
@@ -464,10 +545,6 @@ export default function App() {
     );
   }, [recordTemplateUndoSnapshot, templateModal]);
 
-  const showToast = useCallback((message: string, type: "success" | "error" | "info" = "success") => {
-    setToast({ message, type });
-  }, []);
-
   const handleSaveTemplate = useCallback((template: Template) => {
     const now = new Date().toISOString();
     const savedTemplate: Template =
@@ -531,21 +608,31 @@ export default function App() {
   }, [pdfSource?.bytes, pdfSource?.fileName, selectedProject?.id, showToast]);
 
   const exportFilledPdf = useCallback(
-    async (template: Template, project: Project, promptValues: PromptFieldValues = {}) => {
-      if (!pdfSource?.bytes) {
-        showToast("Drop a PDF first.");
-        return;
+    async (template: Template, project: Project, sourceBytes: Uint8Array, sourceFileName: string, promptValues: PromptFieldValues = {}) => {
+      try {
+        const filledBytes = await writeFilledPdfBytes(sourceBytes, template, project, {
+          defaultFontSize: 10,
+          promptValues,
+        });
+        const baseName = sourceFileName.replace(/\.pdf$/i, "");
+        const suggested = `${baseName} - FILLED.pdf`;
+        const res = await exportPdfBytes(filledBytes, suggested);
+        if (res.canceled) return;
+
+        if (activeDocumentId && selectedProjectId) {
+          updateDocumentInProject(selectedProjectId, activeDocumentId, {
+            status: "filled",
+            updatedAt: new Date().toISOString(),
+          });
+        }
+
+        showToast(res.method === "tauri" ? "Saved filled PDF." : "Downloaded filled PDF.", "success");
+      } catch (err) {
+        console.error("Fill/export failed:", err);
+        showToast(`Export failed: ${err instanceof Error ? err.message : "unknown error"}`, "error");
       }
-      const filledBytes = await writeFilledPdfBytes(pdfSource.bytes, template, project, {
-        defaultFontSize: 10,
-        promptValues,
-      });
-      const suggested = `wrapkit-${project.jobNumber || project.id}.pdf`;
-      const res = await exportPdfBytes(filledBytes, suggested);
-      if (res.canceled) return;
-      showToast(res.method === "tauri" ? "Saved filled PDF." : "Downloaded filled PDF.");
     },
-    [pdfSource?.bytes, showToast]
+    [showToast, activeDocumentId, selectedProjectId, updateDocumentInProject]
   );
 
   const runFillAction = useCallback(
@@ -553,42 +640,45 @@ export default function App() {
       template: Template,
       mode: "preview" | "export",
       project: Project,
+      sourceBytes: Uint8Array,
+      fileName: string,
       promptValues: PromptFieldValues = {}
     ) => {
       if (mode === "preview") {
-        const filledFields = buildFilledFields(project, template, promptValues);
         setPreviewModal({
           template,
-          filledFields,
-          fileName: matchResult?.fileName,
+          fileName,
           promptValues,
+          sourceBytes,
         });
         return;
       }
-      void exportFilledPdf(template, project, promptValues);
+      void exportFilledPdf(template, project, sourceBytes, fileName, promptValues);
     },
-    [exportFilledPdf, matchResult?.fileName]
+    [exportFilledPdf]
   );
 
   const beginFillAction = useCallback(
-    (template: Template, mode: "preview" | "export", project: Project) => {
+    (template: Template, mode: "preview" | "export", project: Project, sourceBytes: Uint8Array, fileName: string) => {
       const promptFields = getPromptFields(template);
       if (promptFields.length === 0) {
-        runFillAction(template, mode, project);
+        runFillAction(template, mode, project, sourceBytes, fileName);
         return;
       }
-      setFillPromptModal({ template, mode });
+      setFillPromptModal({ template, mode, sourceBytes, fileName });
     },
     [runFillAction]
   );
 
   const handlePreviewBeforeExport = useCallback(
-    (templateId: string) => {
+    (templateId: string, overrideBytes?: Uint8Array, overrideFileName?: string) => {
       if (!selectedProject) {
         showToast("Select a project first.");
         return;
       }
-      if (!pdfSource?.bytes) {
+      const bytes = overrideBytes ?? pdfSource?.bytes;
+      const fileName = overrideFileName ?? pdfSource?.fileName ?? "document.pdf";
+      if (!bytes) {
         showToast("Drop a PDF first.");
         return;
       }
@@ -597,18 +687,20 @@ export default function App() {
         showToast("Template not found.");
         return;
       }
-      beginFillAction(template, "preview", selectedProject);
+      beginFillAction(template, "preview", selectedProject, bytes, fileName);
     },
-    [beginFillAction, getTemplateById, pdfSource?.bytes, selectedProject, showToast]
+    [beginFillAction, getTemplateById, pdfSource, selectedProject, showToast]
   );
 
   const handleFillNow = useCallback(
-    (templateId: string) => {
+    (templateId: string, overrideBytes?: Uint8Array, overrideFileName?: string) => {
       if (!selectedProject) {
         showToast("Select a project first.");
         return;
       }
-      if (!pdfSource?.bytes) {
+      const bytes = overrideBytes ?? pdfSource?.bytes;
+      const fileName = overrideFileName ?? pdfSource?.fileName ?? "document.pdf";
+      if (!bytes) {
         showToast("Drop a PDF first.");
         return;
       }
@@ -617,7 +709,7 @@ export default function App() {
         showToast("Template not found.");
         return;
       }
-      beginFillAction(template, "export", selectedProject);
+      beginFillAction(template, "export", selectedProject, bytes, fileName);
     },
     [beginFillAction, getTemplateById, pdfSource?.bytes, selectedProject, showToast]
   );
@@ -642,6 +734,15 @@ export default function App() {
     setNewProjectDraft({});
   }, []);
 
+  const handleEditProject = useCallback(() => {
+    setView("edit-project");
+  }, []);
+
+  const handleSelectProject = useCallback((id: string) => {
+    setSelectedProjectId(id);
+    setView("workspace");
+  }, []);
+
   const displayTemplate = templateModal?.template ?? draftTemplate;
 
   return (
@@ -649,73 +750,133 @@ export default function App() {
       <AppShell
         projects={projects.map((p) => ({ id: p.id, label: p.label || p.jobName || "Untitled" }))}
         selectedProjectId={view === "workspace" ? selectedProjectId : null}
-        onSelectProject={setSelectedProjectId}
+        onSelectProject={handleSelectProject}
         onNewProject={handleNewProject}
       >
-        {view === "new-project" ? (
+        {view === "new-project" || view === "edit-project" ? (
           <NewProjectView
-            initialProject={newProjectDraft}
-            onChange={(updates) =>
-              setNewProjectDraft((prev) => ({
-                ...prev,
-                ...updates,
-              }))
-            }
-            onSave={handleSaveNewProject}
-            onCancel={handleCancelNewProject}
+            initialProject={view === "edit-project" && selectedProject ? selectedProject : newProjectDraft}
+            onChange={(updates) => {
+              if (view === "edit-project" && selectedProjectId) {
+                updateProject(selectedProjectId, updates);
+              } else {
+                setNewProjectDraft((prev) => ({ ...prev, ...updates }));
+              }
+            }}
+            onSave={view === "edit-project" ? () => setView("workspace") : handleSaveNewProject}
+            onCancel={view === "edit-project" ? () => setView("workspace") : handleCancelNewProject}
           />
         ) : (
           <ProjectWorkspace
             project={selectedProject}
-            matchResult={matchResult}
+            documents={currentDocuments}
             onPdfDrop={handlePdfDrop}
-            onUpdateProject={(updates) =>
-              selectedProjectId && updateProject(selectedProjectId, updates)
-            }
-            onOpenTemplateReview={handleOpenTemplateReview}
-            onFillNow={handleFillNow}
-            onPreviewBeforeExport={handlePreviewBeforeExport}
-            onChoosePossibleMatch={(templateId) => {
-              const chosen = matchResult?.possibleMatches?.find((match) => match.templateId === templateId);
-              if (!chosen) return;
-              setMatchResult({
-                kind: "verified",
-                verifiedMatch: chosen,
-                fileName: matchResult?.fileName,
-                lookupMessage: "Using the selected verified template candidate.",
-                matchSource: chosen.source,
-                syncState: "matched",
-              });
+            onEditProject={handleEditProject}
+            onDeleteProject={() => {
+              if (selectedProjectId) deleteProject(selectedProjectId);
             }}
-            onCreateNewTemplate={() => {
-              const draft = {
-                ...createEmptyDraftTemplate(pdfSource?.fileName ?? "Untitled.pdf"),
-                ...mockDraftTemplate,
-                id: `tpl-draft-${Date.now()}`,
-                source: "local-draft",
-              } as Template;
-              setDraftTemplate(draft);
-              setTemplateUndoStack([]);
-              setTemplateRedoStack([]);
-              setTemplateModal({ template: draft });
-              setMatchResult(null);
+            onOpenDocument={(doc) => {
+              setActiveDocumentId(doc.id);
+              if (doc.pdfBytes) {
+                setPdfSource({ fileName: doc.fileName, bytes: doc.pdfBytes });
+              }
+              if (doc.templateId) {
+                const tpl = getTemplateById(doc.templateId);
+                if (tpl) setDraftTemplate(tpl);
+              }
+              if (doc.matchResult) {
+                setMatchModal(doc.matchResult);
+              }
             }}
-            onClearMatch={() => {
-              setMatchResult(null);
-              setPdfSource(null);
-              setDraftTemplate(null);
+            onFillDocument={(doc) => {
+              if (!doc.templateId) {
+                showToast("No template assigned to this document.", "error");
+                return;
+              }
+              const bytes = doc.pdfBytes ?? pdfSource?.bytes;
+              if (!bytes) {
+                showToast("PDF data not available. Try clicking the document name first, then Fill.", "error");
+                return;
+              }
+              setActiveDocumentId(doc.id);
+              setPdfSource({ fileName: doc.fileName, bytes });
+              handleFillNow(doc.templateId, bytes, doc.fileName);
             }}
-            onEditTemplate={(templateId) => {
-              const template = getTemplateById(templateId);
-              if (template) {
-                setTemplateUndoStack([]);
-                setTemplateRedoStack([]);
-                setTemplateModal({ template });
+            onPreviewDocument={(doc) => {
+              if (!doc.templateId) {
+                showToast("No template assigned to this document.", "error");
+                return;
+              }
+              const bytes = doc.pdfBytes ?? pdfSource?.bytes;
+              if (!bytes) {
+                showToast("PDF data not available. Try clicking the document name first, then Preview.", "error");
+                return;
+              }
+              setActiveDocumentId(doc.id);
+              setPdfSource({ fileName: doc.fileName, bytes });
+              handlePreviewBeforeExport(doc.templateId, bytes, doc.fileName);
+            }}
+            onRemoveDocument={(docId) => {
+              if (selectedProjectId) {
+                removeDocumentFromProject(selectedProjectId, docId);
               }
             }}
           />
         )}
       </AppShell>
+
+      {matchModal && (
+        <MatchStatusModal
+          result={matchModal}
+          onClose={() => setMatchModal(null)}
+          onOpenTemplateReview={(templateId) => {
+            setMatchModal(null);
+            handleOpenTemplateReview(templateId);
+          }}
+          onFillNow={(templateId) => {
+            setMatchModal(null);
+            handleFillNow(templateId);
+          }}
+          onPreviewBeforeExport={(templateId) => {
+            setMatchModal(null);
+            handlePreviewBeforeExport(templateId);
+          }}
+          onChoosePossibleMatch={(templateId) => {
+            const chosen = matchModal?.possibleMatches?.find((match) => match.templateId === templateId);
+            if (!chosen) return;
+            setMatchModal({
+              kind: "verified",
+              verifiedMatch: chosen,
+              fileName: matchModal?.fileName,
+              lookupMessage: "Using the selected verified template candidate.",
+              matchSource: chosen.source,
+              syncState: "matched",
+            });
+          }}
+          onCreateNewTemplate={() => {
+            const draft = {
+              ...createEmptyDraftTemplate(pdfSource?.fileName ?? "Untitled.pdf"),
+              ...mockDraftTemplate,
+              id: `tpl-draft-${Date.now()}`,
+              source: "local-draft",
+            } as Template;
+            setDraftTemplate(draft);
+            setTemplateUndoStack([]);
+            setTemplateRedoStack([]);
+            setMatchModal(null);
+            setTemplateModal({ template: draft });
+          }}
+          onEditTemplate={(templateId) => {
+            const template = getTemplateById(templateId);
+            if (template) {
+              setTemplateUndoStack([]);
+              setTemplateRedoStack([]);
+              setMatchModal(null);
+              setTemplateModal({ template });
+            }
+          }}
+        />
+      )}
 
       {displayTemplate && templateModal && (
         <TemplateReviewModal
@@ -728,6 +889,12 @@ export default function App() {
             setTemplateModal(null);
           }}
           onSave={handleSaveTemplate}
+          onConfirm={(template) => {
+            handleSaveTemplate(template);
+            if (selectedProject && pdfSource?.bytes && template.id) {
+              handleFillNow(template.id);
+            }
+          }}
           onSubmitForVerification={handleSubmitTemplate}
           onUndo={handleUndoTemplateEdit}
           canUndo={templateUndoStack.length > 0}
@@ -742,15 +909,16 @@ export default function App() {
         />
       )}
 
-      {previewModal && (
+      {previewModal && selectedProject && (
         <PreviewExportModal
           template={previewModal.template}
-          project={selectedProject!}
-          filledFields={previewModal.filledFields}
+          project={selectedProject}
+          sourceBytes={previewModal.sourceBytes}
+          promptValues={previewModal.promptValues}
           fileName={previewModal.fileName}
           onClose={() => setPreviewModal(null)}
           onExport={() => {
-            void exportFilledPdf(previewModal.template, selectedProject!, previewModal.promptValues);
+            void exportFilledPdf(previewModal.template, selectedProject, previewModal.sourceBytes, previewModal.fileName ?? "document.pdf", previewModal.promptValues);
           }}
           exportLabel="Export filled PDF"
         />
@@ -774,7 +942,7 @@ export default function App() {
               [fillPromptModal.template.id]: values,
             }));
             setFillPromptModal(null);
-            runFillAction(fillPromptModal.template, fillPromptModal.mode, selectedProject, values);
+            runFillAction(fillPromptModal.template, fillPromptModal.mode, selectedProject, fillPromptModal.sourceBytes, fillPromptModal.fileName, values);
           }}
         />
       )}

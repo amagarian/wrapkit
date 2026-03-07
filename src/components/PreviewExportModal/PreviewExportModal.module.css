@@ -11,20 +11,19 @@
 .backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.4);
+  background: rgba(0, 0, 0, 0.35);
 }
 
 .modal {
   position: relative;
   width: 100%;
   max-width: 820px;
-  max-height: 88vh;
+  max-height: 90vh;
   display: flex;
   flex-direction: column;
   background: var(--bg-panel);
   border-radius: var(--radius);
-  border: 1px solid var(--border);
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
 }
 
 .header {
@@ -32,133 +31,142 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  padding: 16px 20px;
+  padding: 14px 20px;
   border-bottom: 1px solid var(--border);
 }
 
 .title {
   margin: 0;
-  font-size: 16px;
+  font-size: 13px;
   font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--letter-wide);
+  color: var(--text);
 }
 
 .subtitle {
   margin: 4px 0 0 0;
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-muted);
 }
 
 .closeBtn {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  background: none;
   border: none;
   border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 24px;
-  line-height: 1;
+  padding: 0;
+  cursor: pointer;
 }
 
 .closeBtn:hover {
-  background: var(--bg-sidebar);
   color: var(--text);
+  background: var(--bg-input);
 }
 
 .body {
   flex: 1;
   min-height: 0;
-  padding: 16px 20px 8px;
-  overflow: hidden;
+  padding: 16px 20px;
+  overflow: auto;
   display: flex;
   flex-direction: column;
+  align-items: center;
+  gap: 12px;
 }
 
-.tableHeader {
-  display: grid;
-  grid-template-columns: 1.2fr 0.8fr 1.2fr;
-  gap: 12px;
-  padding: 10px 12px;
+.pdfContainer {
+  display: flex;
+  justify-content: center;
+  background: #f5f5f4;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: var(--bg-app);
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-muted);
+  padding: 8px;
 }
 
-.rows {
-  margin-top: 10px;
-  overflow: auto;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-panel);
-}
-
-.row {
-  display: grid;
-  grid-template-columns: 1.2fr 0.8fr 1.2fr;
-  gap: 12px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
-}
-
-.row:last-child {
-  border-bottom: none;
-}
-
-.fieldLabel {
-  font-weight: 500;
-}
-
-.mappedKey {
+.generating {
+  padding: 60px 0;
+  text-align: center;
   color: var(--text-muted);
   font-size: 13px;
 }
 
-.value {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+.error {
+  padding: 20px;
+  text-align: center;
+  color: #c44;
+  font-size: 13px;
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pageBtn {
+  padding: 4px 10px;
   font-size: 12px;
   color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.pageBtn:hover:not(:disabled) {
+  background: var(--bg-input);
+}
+
+.pageBtn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.pageInfo {
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 .footer {
   display: flex;
   justify-content: flex-end;
-  gap: 12px;
-  padding: 14px 20px;
+  gap: 8px;
+  padding: 12px 20px;
   border-top: 1px solid var(--border);
 }
 
 .primaryBtn {
-  padding: 8px 16px;
-  font-size: 14px;
+  padding: 7px 14px;
+  font-size: 12px;
   font-weight: 500;
   background: var(--text);
   color: var(--bg-panel);
   border: none;
   border-radius: var(--radius-sm);
+  cursor: pointer;
 }
 
 .primaryBtn:hover {
-  opacity: 0.9;
+  opacity: 0.85;
 }
 
 .secondaryBtn {
-  padding: 8px 16px;
-  font-size: 14px;
+  padding: 7px 14px;
+  font-size: 12px;
   font-weight: 500;
   background: transparent;
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
+  cursor: pointer;
 }
 
 .secondaryBtn:hover {
-  background: var(--bg-sidebar);
+  background: var(--bg-input);
 }
-

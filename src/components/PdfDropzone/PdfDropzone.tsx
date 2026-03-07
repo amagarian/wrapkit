@@ -62,10 +62,7 @@ export function PdfDropzone({ onDrop }: PdfDropzoneProps) {
         onChange={handleFileInput}
         aria-label="Upload PDF"
       />
-      <p className={styles.text}>
-        Drop a PDF here or <span className={styles.browse}>browse</span>
-      </p>
-      <p className={styles.hint}>Production forms only. We’ll try to match a template.</p>
+      <span className={styles.icon}>+</span>
     </div>
   );
 }
