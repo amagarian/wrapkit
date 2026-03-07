@@ -21,6 +21,9 @@ export function PreviewExportModal({
   onExport,
   exportLabel = "Export PDF",
 }: PreviewExportModalProps) {
+  const formatMappedKey = (key: FilledField["mappedProjectKey"]) =>
+    key === "__custom__" ? "Custom value" : key === "__prompt__" ? "Prompt at fill time" : key || "—";
+
   return (
     <div className={styles.overlay} role="dialog" aria-modal="true" aria-labelledby="preview-modal-title">
       <div className={styles.backdrop} onClick={onClose} aria-hidden="true" />
@@ -49,7 +52,7 @@ export function PreviewExportModal({
             {filledFields.map((f) => (
               <div key={f.fieldId} className={styles.row}>
                 <span className={styles.fieldLabel}>{f.label}</span>
-                <span className={styles.mappedKey}>{f.mappedProjectKey || "—"}</span>
+                <span className={styles.mappedKey}>{formatMappedKey(f.mappedProjectKey)}</span>
                 <span className={styles.value}>{f.value || "—"}</span>
               </div>
             ))}

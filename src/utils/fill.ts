@@ -1,9 +1,11 @@
-import type { Project, Template } from "@/types";
+import type { Project, Template, TemplateField, TemplateMappedProjectKey } from "@/types";
+
+export type PromptFieldValues = Record<string, string>;
 
 export interface FilledField {
   fieldId: string;
   label: string;
-  mappedProjectKey: keyof Project | "";
+  mappedProjectKey: TemplateMappedProjectKey;
   value: string;
   pageNumber: number;
   x: number;
@@ -13,13 +15,40 @@ export interface FilledField {
   confidence: number;
 }
 
-export function buildFilledFields(project: Project, template: Template): FilledField[] {
+export function getTemplateFieldPromptLabel(field: TemplateField): string {
+  return field.promptLabel?.trim() || field.label || "Prompt value";
+}
+
+export function getPromptFields(template: Template): TemplateField[] {
+  return template.fields.filter((field) => field.mappedProjectKey === "__prompt__");
+}
+
+export function getTemplateFieldValue(
+  project: Project,
+  field: TemplateField,
+  promptValues: PromptFieldValues = {}
+): string {
+  const key = field.mappedProjectKey;
+  if (key === "__custom__") {
+    return field.customValue?.trim() ?? "";
+  }
+  if (key === "__prompt__") {
+    return promptValues[field.id]?.trim() ?? "";
+  }
+  if (!key) {
+    return "";
+  }
+  const value = project[key];
+  return typeof value === "string" ? value : "";
+}
+
+export function buildFilledFields(
+  project: Project,
+  template: Template,
+  promptValues: PromptFieldValues = {}
+): FilledField[] {
   return template.fields.map((f) => {
-    const key = f.mappedProjectKey;
-    const value =
-      key && typeof project[key] === "string"
-        ? (project[key] as string)
-        : "";
+    const value = getTemplateFieldValue(project, f, promptValues);
     return {
       fieldId: f.id,
       label: f.label,

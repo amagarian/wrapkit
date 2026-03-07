@@ -1,11 +1,13 @@
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import type { Project, Template, TemplateField } from "@/types";
+import { getTemplateFieldValue, type PromptFieldValues } from "@/utils/fill";
 
-function getValue(project: Project, field: TemplateField): string {
-  const key = field.mappedProjectKey;
-  if (!key) return "";
-  const v = project[key];
-  return typeof v === "string" ? v : "";
+function isCheckboxField(field: TemplateField): boolean {
+  return (
+    field.fieldType === "checkbox" ||
+    field.fieldKind === "checkbox-group" ||
+    field.fieldKind === "boolean-checkbox"
+  );
 }
 
 function fitTextToWidth(text: string, width: number, font: any, fontSize: number): string {
@@ -30,6 +32,7 @@ function fitTextToWidth(text: string, width: number, font: any, fontSize: number
 export interface WritePdfOptions {
   /** Default font size used when field height is unknown/too small. */
   defaultFontSize?: number;
+  promptValues?: PromptFieldValues;
 }
 
 /**
@@ -47,28 +50,27 @@ export async function writeFilledPdfBytes(
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
   const defaultFontSize = options.defaultFontSize ?? 10;
+  const promptValues = options.promptValues ?? {};
 
   for (const field of template.fields) {
     const pageIndex = Math.max(0, Math.min(pages.length - 1, field.pageNumber - 1));
     const page = pages[pageIndex];
 
     const pageHeight = page.getHeight();
-    const rawValue = getValue(project, field);
+    const rawValue = getTemplateFieldValue(project, field, promptValues);
     if (!rawValue) continue;
 
     // Interpret template coords as top-left origin (like the editor overlay).
     const x = field.x;
     const yPdfBottom = pageHeight - (field.y + field.height);
 
-    if (field.fieldType === "checkbox") {
-      // For checkboxes, check if the project value matches this checkbox's value
+    if (isCheckboxField(field)) {
+      // For checkbox-like fields, check if the project value matches this box's selected value.
       if (field.checkboxValue && rawValue === field.checkboxValue) {
-        // Draw a checkmark or X
         const checkSize = Math.min(field.width, field.height) * 0.8;
         const centerX = x + field.width / 2;
         const centerY = yPdfBottom + field.height / 2;
-        
-        // Draw an X mark
+
         page.drawText("✓", {
           x: centerX - checkSize / 3,
           y: centerY - checkSize / 3,

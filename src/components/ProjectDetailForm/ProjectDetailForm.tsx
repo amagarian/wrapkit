@@ -1,4 +1,4 @@
-import type { Project, CreditCardType } from "@/types";
+import type { Project, CreditCardType, KeepCardOnFileValue } from "@/types";
 import styles from "./ProjectDetailForm.module.css";
 
 interface ProjectDetailFormProps {
@@ -11,12 +11,15 @@ const TEXT_FIELDS: { key: keyof Project; label: string }[] = [
   { key: "jobName", label: "Job name" },
   { key: "jobNumber", label: "Job number" },
   { key: "poNumber", label: "PO number" },
+  { key: "authorizationDate", label: "Authorization date" },
   { key: "productionCompany", label: "Production company" },
   { key: "billingAddress", label: "Billing address" },
+  { key: "billingZipCode", label: "Billing zip code" },
   { key: "producer", label: "Producer" },
   { key: "email", label: "Email" },
   { key: "phone", label: "Phone" },
   { key: "creditCardHolder", label: "Credit card holder" },
+  { key: "cardholderSignature", label: "Cardholder signature" },
   { key: "creditCardNumber", label: "Credit card number" },
   { key: "expDate", label: "Exp date" },
   { key: "ccv", label: "CCV" },
@@ -86,6 +89,21 @@ export function ProjectDetailForm({ project, onChange }: ProjectDetailFormProps)
           </div>
         );
       })}
+      <div className={styles.row}>
+        <label className={styles.label} htmlFor="keepCardOnFile">
+          Keep card on file
+        </label>
+        <input
+          id="keepCardOnFile"
+          type="checkbox"
+          checked={project.keepCardOnFile === "yes"}
+          onChange={(e) =>
+            onChange({
+              keepCardOnFile: (e.target.checked ? "yes" : "") as KeepCardOnFileValue,
+            })
+          }
+        />
+      </div>
     </div>
   );
 }

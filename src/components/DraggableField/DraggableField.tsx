@@ -7,6 +7,7 @@ interface DraggableFieldProps {
   scale: number;
   selected: boolean;
   onSelect: () => void;
+  onChangeStart?: () => void;
   onChange: (updates: Partial<TemplateField>) => void;
   /** For checkbox fields: current project value to compare against */
   projectValue?: string;
@@ -25,6 +26,7 @@ export function DraggableField({
   scale,
   selected,
   onSelect,
+  onChangeStart,
   onChange,
   projectValue,
   onCheckboxClick,
@@ -37,6 +39,7 @@ export function DraggableField({
     (e: React.MouseEvent, mode: DragMode) => {
       e.preventDefault();
       e.stopPropagation();
+      onChangeStart?.();
       onSelect();
       setDragMode(mode);
       startPos.current = {
@@ -114,7 +117,7 @@ export function DraggableField({
       window.addEventListener("mousemove", handleMouseMove);
       window.addEventListener("mouseup", handleMouseUp);
     },
-    [field, scale, onChange, onSelect]
+    [field, onChange, onChangeStart, onSelect, scale]
   );
 
   const handleFieldMouseDown = useCallback(
@@ -136,7 +139,10 @@ export function DraggableField({
     height: field.height * scale,
   };
 
-  const isCheckbox = field.fieldType === "checkbox";
+  const isCheckbox =
+    field.fieldType === "checkbox" ||
+    field.fieldKind === "checkbox-group" ||
+    field.fieldKind === "boolean-checkbox";
   const isChecked = isCheckbox && projectValue === field.checkboxValue;
 
   // Checkbox fields render as click targets, but can also be dragged when selected
@@ -163,6 +169,10 @@ export function DraggableField({
             }
             onSelect();
           }
+        }}
+        onClick={(e) => {
+          // Keep checkbox selection from being cleared by the preview container click handler.
+          e.stopPropagation();
         }}
         title={selected 
           ? `Drag to reposition ${field.checkboxValue}` 

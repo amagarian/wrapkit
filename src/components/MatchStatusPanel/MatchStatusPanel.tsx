@@ -22,7 +22,7 @@ export function MatchStatusPanel({
   onClearMatch,
   onEditTemplate,
 }: MatchStatusPanelProps) {
-  const { kind, verifiedMatch, possibleMatches, draftTemplateId, fileName } = result;
+  const { kind, verifiedMatch, possibleMatches, draftTemplateId, fileName, lookupMessage, matchSource, syncState } = result;
 
   return (
     <div className={styles.panel}>
@@ -32,6 +32,14 @@ export function MatchStatusPanel({
           Clear
         </button>
       </div>
+
+      {lookupMessage && (
+        <p className={styles.statusNote}>
+          {lookupMessage}
+          {matchSource ? ` Source: ${matchSource}.` : ""}
+          {syncState === "matching" ? " Matching..." : ""}
+        </p>
+      )}
 
       {kind === "verified" && verifiedMatch && (
         <div className={styles.card} data-state="verified">

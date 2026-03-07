@@ -178,6 +178,16 @@
   font-size: 12px;
 }
 
+.input {
+  width: 100%;
+  padding: 6px 8px;
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  font-size: 12px;
+}
+
 .fieldCoords {
   display: flex;
   gap: 8px;
@@ -188,6 +198,14 @@
   padding: 4px 6px;
   background: var(--bg-sidebar);
   border-radius: var(--radius-sm);
+}
+
+.fieldMeta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 10px;
+  color: var(--text-muted);
 }
 
 .fieldItemActions {
@@ -291,6 +309,17 @@
 .addFieldBtn:hover {
   border-color: var(--border-focus);
   background: var(--bg-sidebar);
+}
+
+.addActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.addActions .addFieldBtn {
+  margin-top: 0;
 }
 
 .footer {
