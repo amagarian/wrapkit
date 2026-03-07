@@ -51,7 +51,7 @@ export const CANONICAL_FIELD_DEFINITIONS: CanonicalFieldDefinition[] = [
     label: "Date",
     mappedProjectKey: "authorizationDate",
     fieldKind: "date",
-    aliases: ["authorization date", "date", "auth date"],
+    aliases: ["authorization date", "auth date"],
     sectionHints: ["authorization", "signature", "footer"],
   },
   {
@@ -61,6 +61,8 @@ export const CANONICAL_FIELD_DEFINITIONS: CanonicalFieldDefinition[] = [
     fieldKind: "text",
     aliases: [
       "production company",
+      "company / contact",
+      "name of company",
       "business",
       "company name",
       "production co",
@@ -75,6 +77,8 @@ export const CANONICAL_FIELD_DEFINITIONS: CanonicalFieldDefinition[] = [
     fieldKind: "multiline",
     aliases: [
       "billing address",
+      "billing address of card holder",
+      "company address",
       "credit card billing address",
       "mailing address",
       "remit to",
@@ -111,7 +115,7 @@ export const CANONICAL_FIELD_DEFINITIONS: CanonicalFieldDefinition[] = [
     label: "Phone",
     mappedProjectKey: "phone",
     fieldKind: "text",
-    aliases: ["phone", "phone number", "phone numbers", "telephone", "mobile", "cell"],
+    aliases: ["phone", "phone #", "phone number", "phone numbers", "telephone", "telephone #", "mobile", "cell"],
     sectionHints: ["contact", "billing"],
   },
   {
@@ -120,6 +124,7 @@ export const CANONICAL_FIELD_DEFINITIONS: CanonicalFieldDefinition[] = [
     mappedProjectKey: "creditCardHolder",
     fieldKind: "text",
     aliases: [
+      "card holder",
       "name of cardholder",
       "cardholder name",
       "cardholder name as shown on card",
@@ -150,8 +155,11 @@ export const CANONICAL_FIELD_DEFINITIONS: CanonicalFieldDefinition[] = [
     fieldKind: "text",
     aliases: [
       "credit card number",
+      "credit card #",
       "card number",
       "cc number",
+      "cc #",
+      "cc#",
       "card identification number",
       "account number",
     ],
@@ -178,7 +186,7 @@ export const CANONICAL_FIELD_DEFINITIONS: CanonicalFieldDefinition[] = [
     label: "Security Code",
     mappedProjectKey: "ccv",
     fieldKind: "text",
-    aliases: ["security code", "cvv", "cvc", "cid", "ccv"],
+    aliases: ["security code", "verification code", "cvv", "cvc", "cid", "ccv"],
     sectionHints: ["payment", "billing"],
   },
   {
@@ -220,21 +228,6 @@ export const CANONICAL_FIELD_DEFINITIONS: CanonicalFieldDefinition[] = [
     checkboxValue: "amex",
     groupId: "creditCardType",
     sectionHints: ["payment", "card-type"],
-  },
-  {
-    id: "keepCardOnFile",
-    label: "Keep Card On File",
-    mappedProjectKey: "keepCardOnFile",
-    fieldKind: "boolean-checkbox",
-    aliases: [
-      "keep this credit card information on file",
-      "keep card on file",
-      "future rentals",
-      "present and future rentals",
-      "client approval",
-    ],
-    checkboxValue: "yes",
-    sectionHints: ["payment", "authorization"],
   },
 ];
 

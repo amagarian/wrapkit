@@ -19,7 +19,6 @@ const PROJECT_KEY_LABELS: Record<string, string> = {
   ccv: "CCV",
   billingZipCode: "Billing zip code",
   cardholderSignature: "Signature",
-  keepCardOnFile: "Keep card on file",
   authorizationDate: "Authorization date",
 };
 
@@ -39,26 +38,7 @@ function isCheckboxField(field: TemplateField): boolean {
   );
 }
 
-function formatDetectionSource(source: TemplateField["detectionSource"]): string {
-  switch (source) {
-    case "text-inline":
-      return "inline text";
-    case "text-line":
-      return "text line";
-    case "geometry-line":
-      return "geometry line";
-    case "geometry-box":
-      return "geometry box";
-    case "glyph-checkbox":
-      return "checkbox glyph";
-    case "acroform":
-      return "acroform";
-    case "manual":
-      return "manual";
-    default:
-      return "detected";
-  }
-}
+
 
 interface TemplateReviewModalProps {
   template: Template;
@@ -140,7 +120,6 @@ export function TemplateReviewModal({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [canRedo, canUndo, onRedo, onUndo]);
 
-  const selectedField = template.fields.find((f) => f.id === selectedFieldId);
   const saveLabel = template.status === "verified" ? "Save local override" : "Save template locally";
 
   return (
@@ -188,8 +167,6 @@ export function TemplateReviewModal({
                         ? (value) => {
                             if (f.mappedProjectKey === "creditCardType") {
                               onProjectChange({ creditCardType: value as Project["creditCardType"] });
-                            } else if (f.mappedProjectKey === "keepCardOnFile") {
-                              onProjectChange({ keepCardOnFile: value as Project["keepCardOnFile"] });
                             }
                           }
                         : undefined
@@ -314,17 +291,6 @@ export function TemplateReviewModal({
                       ))}
                     </select>
                   )}
-                  <div className={styles.fieldCoords}>
-                    <span>x: {Math.round(f.x)}</span>
-                    <span>y: {Math.round(f.y)}</span>
-                    <span>w: {Math.round(f.width)}</span>
-                    <span>h: {Math.round(f.height)}</span>
-                  </div>
-                  <div className={styles.fieldMeta}>
-                    <span>{f.fieldKind ?? f.fieldType ?? "text"}</span>
-                    <span>{formatDetectionSource(f.detectionSource)}</span>
-                    <span>{Math.round((f.confidence ?? 0) * 100)}%</span>
-                  </div>
                 </li>
               ))}
             </ul>
@@ -337,14 +303,6 @@ export function TemplateReviewModal({
               </button>
             </div>
 
-            {selectedField && (
-              <div className={styles.selectedInfo}>
-                <h4>Selected: {selectedField.label}</h4>
-                <p className={styles.selectedHint}>
-                  Drag to reposition. Use edge handles to resize width, corner handle to resize both. Use Cmd/Ctrl+Z to undo and Shift+Cmd/Ctrl+Z to redo.
-                </p>
-              </div>
-            )}
           </aside>
         </div>
 
@@ -371,7 +329,7 @@ export function TemplateReviewModal({
             className={styles.confirmBtn}
             onClick={() => onConfirm(template)}
           >
-            Confirm
+            Fill
           </button>
         </footer>
       </div>

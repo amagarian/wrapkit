@@ -5,7 +5,6 @@
 
 /** Credit card type options */
 export type CreditCardType = "visa" | "mastercard" | "discover" | "amex" | "";
-export type KeepCardOnFileValue = "yes" | "";
 export type TemplateMappedProjectKey = keyof Project | "__custom__" | "__prompt__" | "";
 export type CanonicalFieldId =
   | "projectLabel"
@@ -23,7 +22,6 @@ export type CanonicalFieldId =
   | "creditCardTypeMastercard"
   | "creditCardTypeDiscover"
   | "creditCardTypeAmex"
-  | "keepCardOnFile"
   | "creditCardHolder"
   | "cardholderSignature"
   | "creditCardNumber"
@@ -73,7 +71,6 @@ export interface Project {
   email: string;
   phone: string;
   creditCardType: CreditCardType;
-  keepCardOnFile: KeepCardOnFileValue;
   creditCardHolder: string;
   cardholderSignature: string;
   creditCardNumber: string;

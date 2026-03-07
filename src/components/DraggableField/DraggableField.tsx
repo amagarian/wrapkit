@@ -21,6 +21,22 @@ type DragMode =
   | "resize-nw" | "resize-ne" | "resize-sw" | "resize-se" 
   | null;
 
+function findScrollParent(el: HTMLElement | null): HTMLElement | null {
+  let current = el?.parentElement ?? null;
+  while (current) {
+    const style = getComputedStyle(current);
+    if (
+      ["auto", "scroll"].includes(style.overflow) ||
+      ["auto", "scroll"].includes(style.overflowX) ||
+      ["auto", "scroll"].includes(style.overflowY)
+    ) {
+      return current;
+    }
+    current = current.parentElement;
+  }
+  return null;
+}
+
 export function DraggableField({
   field,
   scale,
@@ -51,7 +67,14 @@ export function DraggableField({
         fieldH: field.height,
       };
 
+      const scrollParent = findScrollParent(containerRef.current);
+      const savedOverflow = scrollParent?.style.overflow ?? "";
+      if (scrollParent) {
+        scrollParent.style.overflow = "hidden";
+      }
+
       const handleMouseMove = (moveEvent: MouseEvent) => {
+        moveEvent.preventDefault();
         const dx = (moveEvent.clientX - startPos.current.x) / scale;
         const dy = (moveEvent.clientY - startPos.current.y) / scale;
         const { fieldX, fieldY, fieldW, fieldH } = startPos.current;
@@ -110,6 +133,9 @@ export function DraggableField({
 
       const handleMouseUp = () => {
         setDragMode(null);
+        if (scrollParent) {
+          scrollParent.style.overflow = savedOverflow;
+        }
         window.removeEventListener("mousemove", handleMouseMove);
         window.removeEventListener("mouseup", handleMouseUp);
       };

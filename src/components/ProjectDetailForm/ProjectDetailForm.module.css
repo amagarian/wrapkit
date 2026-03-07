@@ -63,28 +63,3 @@ select.input {
   line-height: 1;
 }
 
-.checkboxRow {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 16px;
-  background: var(--bg-input);
-  border-bottom: 1px solid var(--border);
-}
-
-.checkbox {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--text);
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.checkboxLabel {
-  font-size: 9px;
-  font-weight: var(--header-uppercase);
-  text-transform: uppercase;
-  letter-spacing: var(--letter-wide);
-  color: var(--text-label);
-  cursor: pointer;
-}

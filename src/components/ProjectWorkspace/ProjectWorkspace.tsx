@@ -6,11 +6,12 @@ import styles from "./ProjectWorkspace.module.css";
 interface ProjectWorkspaceProps {
   project: Project | null;
   documents: ProjectDocument[];
-  onPdfDrop: (file: File | null) => void;
+  onPdfDrop: (files: File[] | null) => void;
   onEditProject: () => void;
   onDeleteProject: () => void;
   onOpenDocument: (doc: ProjectDocument) => void;
-  onFillDocument: (doc: ProjectDocument) => void;
+  onDownloadDocument: (doc: ProjectDocument) => void;
+  onEditTemplateDocument: (doc: ProjectDocument) => void;
   onPreviewDocument: (doc: ProjectDocument) => void;
   onRemoveDocument: (docId: string) => void;
 }
@@ -28,7 +29,8 @@ export function ProjectWorkspace({
   onEditProject,
   onDeleteProject,
   onOpenDocument,
-  onFillDocument,
+  onDownloadDocument,
+  onEditTemplateDocument,
   onPreviewDocument,
   onRemoveDocument,
 }: ProjectWorkspaceProps) {
@@ -80,7 +82,8 @@ export function ProjectWorkspace({
         <DocumentList
           documents={documents}
           onOpen={onOpenDocument}
-          onFill={onFillDocument}
+          onDownload={onDownloadDocument}
+          onEditTemplate={onEditTemplateDocument}
           onPreview={onPreviewDocument}
           onRemove={onRemoveDocument}
         />

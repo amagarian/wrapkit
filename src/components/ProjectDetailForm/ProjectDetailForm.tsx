@@ -1,4 +1,4 @@
-import type { Project, CreditCardType, KeepCardOnFileValue } from "@/types";
+import type { Project, CreditCardType } from "@/types";
 import styles from "./ProjectDetailForm.module.css";
 
 interface ProjectDetailFormProps {
@@ -88,24 +88,6 @@ export function ProjectDetailForm({ project, onChange, readOnly }: ProjectDetail
           </label>
         </div>
       ))}
-
-      <div className={styles.checkboxRow}>
-        <input
-          id="keepCardOnFile"
-          type="checkbox"
-          className={styles.checkbox}
-          checked={project.keepCardOnFile === "yes"}
-          onChange={(e) =>
-            onChange({
-              keepCardOnFile: (e.target.checked ? "yes" : "") as KeepCardOnFileValue,
-            })
-          }
-          disabled={readOnly}
-        />
-        <label className={styles.checkboxLabel} htmlFor="keepCardOnFile">
-          KEEP CARD ON FILE
-        </label>
-      </div>
     </div>
   );
 }
