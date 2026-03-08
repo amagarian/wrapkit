@@ -66,7 +66,7 @@ echo "==> Code signing succeeded"
 # Recreate the updater tar.gz from the freshly signed app
 echo "==> Creating updater archive..."
 cd "$BUNDLE_DIR/macos"
-tar czf Wrapkit.app.tar.gz Wrapkit.app
+COPYFILE_DISABLE=1 tar czf Wrapkit.app.tar.gz Wrapkit.app
 cd "$PROJECT_DIR"
 
 # Sign the updater archive
