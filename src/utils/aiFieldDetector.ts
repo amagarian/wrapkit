@@ -1232,13 +1232,345 @@ async function detectFieldsWithAzure(
   return dedupeFields(templateFields);
 }
 
+// --------------- Apryse Data Extraction Server ---------------
+
+interface ApryseAcroFormField {
+  name: string;
+  type: string;
+  value: string;
+  rect: { x: number; y: number; width: number; height: number };
+  pdfRect: [number, number, number, number];
+}
+
+interface ApryseFormField {
+  type: string;
+  confidence: number;
+  rect: { x: number; y: number; width: number; height: number };
+  rawRect: [number, number, number, number];
+}
+
+interface ApryseKVField {
+  label: string;
+  value: string;
+  confidence: number;
+  rect: { x: number; y: number; width: number; height: number };
+  keyRect: { x: number; y: number; width: number; height: number } | null;
+  rawRect: [number, number, number, number];
+}
+
+interface ApryseResponse {
+  method: string;
+  acroFormFields: ApryseAcroFormField[];
+  formFields: ApryseFormField[];
+  kvFields: ApryseKVField[];
+  pageWidth: number;
+  pageHeight: number;
+  elapsedMs: number;
+}
+
+function getApryseServerUrl(): string {
+  const url = import.meta.env.VITE_APRYSE_SERVER_URL as string;
+  if (!url) throw new Error("VITE_APRYSE_SERVER_URL not configured");
+  return url.replace(/\/$/, "");
+}
+
+async function callApryseServer(pdfBase64: string, page: number): Promise<ApryseResponse> {
+  const url = `${getApryseServerUrl()}/extract-fields`;
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pdfBase64, page }),
+  });
+  if (!resp.ok) {
+    const detail = await resp.text().catch(() => "");
+    throw new Error(`Apryse server error ${resp.status}: ${detail}`);
+  }
+  return resp.json();
+}
+
+function matchCanonicalId(label: string): string | null {
+  const lower = label.toLowerCase().trim();
+  for (const def of CANONICAL_FIELD_DEFINITIONS) {
+    if (def.id === lower) return def.id;
+    if (def.label.toLowerCase() === lower) return def.id;
+    for (const alias of def.aliases) {
+      if (alias.toLowerCase() === lower) return def.id;
+    }
+  }
+  // Fuzzy: check if label contains any alias
+  for (const def of CANONICAL_FIELD_DEFINITIONS) {
+    for (const alias of def.aliases) {
+      if (lower.includes(alias.toLowerCase()) && alias.length >= 3) return def.id;
+    }
+    if (lower.includes(def.label.toLowerCase()) && def.label.length >= 3) return def.id;
+  }
+  return null;
+}
+
+function apryseFieldTypeToWrapkit(
+  apryseType: string
+): { fieldType: "text" | "checkbox"; fieldKind: TemplateFieldKind } {
+  switch (apryseType) {
+    case "checkbox":
+    case "formCheckBox":
+      return { fieldType: "checkbox", fieldKind: "boolean-checkbox" };
+    case "radio":
+    case "formRadioButton":
+      return { fieldType: "checkbox", fieldKind: "checkbox-group" };
+    case "signature":
+    case "formDigitalSignature":
+      return { fieldType: "text", fieldKind: "signature" };
+    default:
+      return { fieldType: "text", fieldKind: "text" };
+  }
+}
+
+async function detectFieldsWithApryse(
+  pdfBytes: Uint8Array,
+  pageNumber: number,
+  onStatus?: (status: string) => void
+): Promise<TemplateField[]> {
+  console.log("[Wrapkit Apryse] Starting Apryse Data Extraction…");
+  onStatus?.("Sending to Apryse server…");
+
+  const pdfBase64 = btoa(
+    Array.from(pdfBytes, (b) => String.fromCharCode(b)).join("")
+  );
+
+  const data = await callApryseServer(pdfBase64, pageNumber);
+  console.log(
+    `[Wrapkit Apryse] Got ${data.acroFormFields.length} AcroForm, ` +
+    `${data.formFields.length} detected, ${data.kvFields.length} KV fields ` +
+    `(${data.elapsedMs}ms server-side)`
+  );
+
+  onStatus?.("Processing Apryse results…");
+
+  const templateFields: TemplateField[] = [];
+  const usedRects = new Set<string>();
+  const rectKey = (r: { x: number; y: number; width: number; height: number }) =>
+    `${Math.round(r.x)},${Math.round(r.y)},${Math.round(r.width)},${Math.round(r.height)}`;
+
+  // Priority 1: AcroForm fields — these are 100% accurate interactive form widgets
+  if (data.acroFormFields.length > 0) {
+    console.log("[Wrapkit Apryse] Using AcroForm fields (interactive PDF form widgets)");
+    for (const af of data.acroFormFields) {
+      if (af.type === "button") continue;
+
+      // Skip garbage fields: "undefined" names, empty names, paragraph-length names
+      if (!af.name || af.name === "undefined" || af.name.length > 40) {
+        console.log(`[Wrapkit Apryse] Skipping garbage AcroForm field: "${af.name?.slice(0, 50)}…"`);
+        continue;
+      }
+
+      const { fieldType, fieldKind } = apryseFieldTypeToWrapkit(af.type);
+      const canonicalId = matchCanonicalId(af.name);
+      const canonicalDef = canonicalId
+        ? CANONICAL_FIELD_DEFINITIONS.find((d) => d.id === canonicalId)
+        : undefined;
+
+      // Properly handle credit card type checkboxes
+      const isCardCheckbox = canonicalId && CREDIT_CARD_CHECKBOX_IDS.has(canonicalId);
+      const resolvedFieldKind: TemplateFieldKind = isCardCheckbox
+        ? "checkbox-group"
+        : (canonicalDef?.fieldKind ?? fieldKind);
+      const resolvedGroupId = isCardCheckbox ? "creditCardType" : (canonicalDef?.groupId ?? null);
+      const resolvedCheckboxValue = isCardCheckbox
+        ? (canonicalDef?.checkboxValue ?? af.name.toLowerCase())
+        : (fieldType === "checkbox" ? af.value || null : null);
+
+      const aiField: AiIdentifiedField = {
+        canonicalFieldId: canonicalId,
+        label: canonicalDef?.label || af.name,
+        nearbyText: af.name,
+        fieldType,
+        fieldKind: resolvedFieldKind,
+        checkboxValue: resolvedCheckboxValue,
+        groupId: resolvedGroupId,
+      };
+
+      const key = rectKey(af.rect);
+      if (usedRects.has(key)) continue;
+      usedRects.add(key);
+
+      templateFields.push(buildTemplateField(aiField, af.rect, templateFields.length, pageNumber));
+    }
+  }
+
+  // Priority 2: KV fields — have both geometry AND label text
+  for (const kv of data.kvFields) {
+    if (kv.confidence < 0.3) continue;
+    const key = rectKey(kv.rect);
+    if (usedRects.has(key)) continue;
+
+    const canonicalId = matchCanonicalId(kv.label);
+    const canonicalDef = canonicalId
+      ? CANONICAL_FIELD_DEFINITIONS.find((d) => d.id === canonicalId)
+      : undefined;
+
+    const aiField: AiIdentifiedField = {
+      canonicalFieldId: canonicalId,
+      label: canonicalDef?.label || kv.label || `Field ${templateFields.length + 1}`,
+      nearbyText: kv.label,
+      fieldType: "text",
+      fieldKind: canonicalDef?.fieldKind ?? "text",
+      checkboxValue: null,
+      groupId: canonicalDef?.groupId ?? null,
+    };
+
+    usedRects.add(key);
+    templateFields.push(buildTemplateField(aiField, kv.rect, templateFields.length, pageNumber));
+  }
+
+  // Priority 3: Form detection fields — geometry only (no labels)
+  // Use nearby text from PDF.js context to attempt labeling
+  if (templateFields.length < 3 && data.formFields.length > 0) {
+    const context = await buildDetectionContext(pdfBytes, pageNumber);
+
+    for (const ff of data.formFields) {
+      if (ff.confidence < 0.4) continue;
+      const key = rectKey(ff.rect);
+      if (usedRects.has(key)) continue;
+
+      // Try to find a text label near this detected field
+      let bestLabel = "";
+      let bestDist = Infinity;
+      for (const line of context.textLines) {
+        const lineCenter = line.y + line.height / 2;
+        const fieldCenter = ff.rect.y + ff.rect.height / 2;
+        const dx = Math.abs(line.x - ff.rect.x);
+        const dy = Math.abs(lineCenter - fieldCenter);
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist < bestDist && dist < 50) {
+          bestDist = dist;
+          bestLabel = line.items.map((i: PositionedTextItem) => i.text).join("").trim();
+        }
+      }
+
+      const { fieldType, fieldKind } = apryseFieldTypeToWrapkit(ff.type);
+      const canonicalId = bestLabel ? matchCanonicalId(bestLabel) : null;
+      const canonicalDef = canonicalId
+        ? CANONICAL_FIELD_DEFINITIONS.find((d) => d.id === canonicalId)
+        : undefined;
+
+      const aiField: AiIdentifiedField = {
+        canonicalFieldId: canonicalId,
+        label: canonicalDef?.label || bestLabel || `Field ${templateFields.length + 1}`,
+        nearbyText: bestLabel,
+        fieldType,
+        fieldKind: canonicalDef?.fieldKind ?? fieldKind,
+        checkboxValue: null,
+        groupId: null,
+      };
+
+      usedRects.add(key);
+      templateFields.push(buildTemplateField(aiField, ff.rect, templateFields.length, pageNumber));
+    }
+  }
+
+  // Supplemental: detect missing signatures using PDF.js geometry
+  // Fast (no AI call) — finds underlines above "SIGNATURE" text labels
+  try {
+    const context = await buildDetectionContext(pdfBytes, pageNumber);
+    const usedGeoIds = new Set<string>();
+    let geoSupplementCount = 0;
+
+    // Find signature fields: look for "SIGNATURE" text labels and underlines ABOVE them
+    for (const line of context.textLines) {
+      const lineText = line.items.map((i: PositionedTextItem) => i.text).join("").trim().toUpperCase();
+      if (!lineText.includes("SIGNATURE")) continue;
+
+      // On production forms, the signature underline is ABOVE the "SIGNATURE" label.
+      // Search geometry for underlines/lines in a band 5–30px above this label,
+      // horizontally overlapping with the label position.
+      const labelX = line.x;
+      const labelY = line.y;
+      let bestGeo: typeof context.geometryCandidates[0] | null = null;
+      let bestDist = Infinity;
+
+      for (const geo of context.geometryCandidates) {
+        if (usedGeoIds.has(geo.id)) continue;
+        if (geo.width < 60) continue; // signature lines are long
+        if (geo.height > 5) continue; // underlines are thin
+
+        const geoBottom = geo.y + geo.height;
+        const gap = labelY - geoBottom;
+
+        // Must be above the label, within 30px
+        if (gap < 0 || gap > 30) continue;
+
+        // Must horizontally overlap with the label area
+        const overlapLeft = Math.max(labelX, geo.x);
+        const overlapRight = Math.min(labelX + 150, geo.x + geo.width);
+        if (overlapRight - overlapLeft < 30) continue;
+
+        if (gap < bestDist) {
+          bestDist = gap;
+          bestGeo = geo;
+        }
+      }
+
+      if (bestGeo) {
+        usedGeoIds.add(bestGeo.id);
+        const coords = {
+          x: bestGeo.x,
+          y: Math.max(0, bestGeo.y - 12),
+          width: bestGeo.width,
+          height: Math.max(14, labelY - bestGeo.y + 2),
+        };
+
+        const sigField: AiIdentifiedField = {
+          canonicalFieldId: "cardholderSignature",
+          label: "Signature",
+          nearbyText: lineText,
+          fieldType: "text",
+          fieldKind: "signature",
+          checkboxValue: null,
+          groupId: null,
+        };
+
+        templateFields.push(buildTemplateField(sigField, coords, templateFields.length, pageNumber));
+        geoSupplementCount++;
+        console.log(`[Wrapkit Apryse] Geometry supplemental: added Signature at y=${Math.round(coords.y)}`);
+      }
+    }
+
+    if (geoSupplementCount > 0) {
+      console.log(`[Wrapkit Apryse] Geometry supplemental added ${geoSupplementCount} field(s)`);
+    }
+  } catch (err) {
+    console.warn("[Wrapkit Apryse] Geometry supplemental failed (non-critical):", err);
+  }
+
+  console.log(`[Wrapkit Apryse] Produced ${templateFields.length} total template fields`);
+  return dedupeFields(templateFields);
+}
+
 export async function detectFieldsWithAI(
   pdfBytes: Uint8Array,
   pageNumber: number = 1,
   onStatus?: (status: string) => void
 ): Promise<TemplateField[]> {
-  // Tier 1: Visual Geometry Matching (GPT-4o Vision + numbered PDF.js markers)
-  // Highest accuracy: LLM visually matches numbered geometry to field labels
+  // Tier 1: Apryse Data Extraction (AcroForm + AI form detection)
+  // Most accurate: native PDF form widgets + ML-based geometry detection
+  try {
+    getApryseServerUrl(); // throws if not configured
+    const apryseFields = await detectFieldsWithApryse(pdfBytes, pageNumber, onStatus);
+    if (apryseFields.length > 0) {
+      console.log(`[Wrapkit AI] Apryse succeeded with ${apryseFields.length} fields`);
+      return apryseFields;
+    }
+    console.log("[Wrapkit AI] Apryse returned 0 fields, falling back…");
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("not configured")) {
+      console.log("[Wrapkit AI] Apryse server not configured, skipping…");
+    } else {
+      console.warn("[Wrapkit AI] Apryse detection failed, falling back:", err);
+    }
+  }
+
+  // Tier 2: Visual Geometry Matching (GPT-4o Vision + numbered PDF.js markers)
   try {
     const visualFields = await detectFieldsWithVisualMatching(pdfBytes, pageNumber, onStatus);
     if (visualFields.length > 0) {
@@ -1250,7 +1582,7 @@ export async function detectFieldsWithAI(
     console.warn("[Wrapkit AI] Visual matching failed, falling back:", err);
   }
 
-  // Tier 2: Azure Document Intelligence + Gemini (prebuilt-document model)
+  // Tier 3: Azure Document Intelligence (prebuilt-document model)
   try {
     const azureFields = await detectFieldsWithAzure(pdfBytes, pageNumber, onStatus);
     if (azureFields.length > 0) {
@@ -1262,7 +1594,7 @@ export async function detectFieldsWithAI(
     console.warn("[Wrapkit AI] Azure detection failed, falling back:", err);
   }
 
-  // Tier 3: GPT-4o + PDF.js hybrid (final fallback)
+  // Tier 4: GPT-4o + PDF.js hybrid (final fallback)
   console.log("[Wrapkit AI] Starting hybrid AI+PDF.js detection (GPT-4o fallback)...");
   onStatus?.("Rendering PDF…");
 
