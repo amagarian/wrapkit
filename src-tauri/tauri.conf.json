@@ -1,6 +1,6 @@
 {
   "productName": "Wrapkit",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "identifier": "com.wrapkit.app",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -43,7 +43,7 @@
     "macOS": {
       "minimumSystemVersion": "10.15",
       "exceptionDomain": "",
-      "signingIdentity": "Developer ID Application: Aiden Magarian (NF6D29P3HJ)",
+      "signingIdentity": null,
       "providerShortName": "NF6D29P3HJ",
       "entitlements": null
     },
