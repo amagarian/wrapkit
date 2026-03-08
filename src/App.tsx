@@ -142,7 +142,6 @@ export default function App() {
   const [projectDocuments, setProjectDocuments] = useState<Record<string, ProjectDocument[]>>({});
   const [activeDocumentId, setActiveDocumentId] = useState<string | null>(null);
   const [matchModal, setMatchModal] = useState<PdfMatchResult | null>(null);
-  const [processingStatus, setProcessingStatus] = useState<string | null>(null);
 
   const selectedProject = selectedProjectId
     ? projects.find((p) => p.id === selectedProjectId) ?? null
@@ -374,9 +373,17 @@ export default function App() {
       let detectedFields: Template["fields"] = [];
       let detectionMethod: "ai" | "heuristic" | "none" = "none";
 
+      const setDocProcessing = (msg: string) => {
+        updateDocumentInProject(selectedProjectId, docId, {
+          status: "processing",
+          processingMessage: msg,
+        });
+      };
+
       try {
         console.log("[Wrapkit] Trying AI field detection...");
-        detectedFields = await detectFieldsWithAI(bytes, 1, setProcessingStatus);
+        setDocProcessing("Analyzing with AI…");
+        detectedFields = await detectFieldsWithAI(bytes, 1, setDocProcessing);
         if (detectedFields.length > 0) {
           detectionMethod = "ai";
           console.log(`[Wrapkit] AI detected ${detectedFields.length} field(s)`);
@@ -387,7 +394,7 @@ export default function App() {
 
       if (detectedFields.length === 0) {
         try {
-          setProcessingStatus("Detecting fields…");
+          setDocProcessing("Detecting fields…");
           detectedFields = await detectFieldsFromPdf(bytes, 1);
           if (detectedFields.length > 0) {
             detectionMethod = "heuristic";
@@ -396,8 +403,6 @@ export default function App() {
           console.warn("[Wrapkit] Heuristic detection also failed:", err);
         }
       }
-
-      setProcessingStatus(null);
 
       const draft: Template =
         detectedFields.length > 0
@@ -452,23 +457,27 @@ export default function App() {
     (files: File[] | null) => {
       if (!files || files.length === 0 || !selectedProjectId || !selectedProject) return;
 
-      void (async () => {
-        if (files.length === 1) {
-          await processDroppedPdf(files[0], { showMatchModal: true });
-          return;
-        }
+      if (files.length === 1) {
+        void processDroppedPdf(files[0], { showMatchModal: true });
+        return;
+      }
 
+      // Batch: launch all files concurrently, toast summary when all finish
+      const promises = files.map((file) =>
+        processDroppedPdf(file, {
+          showMatchModal: false,
+          autoFillVerified: true,
+          silentToasts: true,
+        })
+      );
+
+      void Promise.all(promises).then((outcomes) => {
         let verifiedFilled = 0;
         let verifiedReady = 0;
         let manualReview = 0;
         let possible = 0;
 
-        for (const file of files) {
-          const outcome = await processDroppedPdf(file, {
-            showMatchModal: false,
-            autoFillVerified: true,
-            silentToasts: true,
-          });
+        for (const outcome of outcomes) {
           if (outcome === "verified-filled") verifiedFilled += 1;
           else if (outcome === "verified-ready") verifiedReady += 1;
           else if (outcome === "possible") possible += 1;
@@ -488,7 +497,7 @@ export default function App() {
             : "Batch complete.",
           verifiedFilled > 0 ? "success" : "info"
         );
-      })();
+      });
     },
     [processDroppedPdf, selectedProject, selectedProjectId, showToast]
   );
@@ -1044,7 +1053,6 @@ export default function App() {
           <ProjectWorkspace
             project={selectedProject}
             documents={currentDocuments}
-            processingStatus={processingStatus}
             onPdfDrop={handlePdfDrop}
             onEditProject={handleEditProject}
             onDeleteProject={() => {
@@ -1207,21 +1215,30 @@ export default function App() {
             const bytes = pdfSource.bytes;
             setTemplateModal(null);
 
+            const setRedetectStatus = (msg: string) => {
+              if (activeDocumentId && selectedProjectId) {
+                updateDocumentInProject(selectedProjectId, activeDocumentId, {
+                  status: "processing",
+                  processingMessage: msg,
+                });
+              }
+            };
+
             let detectedFields: Template["fields"] = [];
             try {
-              detectedFields = await detectFieldsWithAI(bytes, 1, setProcessingStatus);
+              setRedetectStatus("Re-analyzing with AI…");
+              detectedFields = await detectFieldsWithAI(bytes, 1, setRedetectStatus);
             } catch (err) {
               console.warn("[Wrapkit] AI re-detection failed, falling back:", err);
             }
             if (detectedFields.length === 0) {
               try {
-                setProcessingStatus("Detecting fields…");
+                setRedetectStatus("Detecting fields…");
                 detectedFields = await detectFieldsFromPdf(bytes, 1);
               } catch (err) {
                 console.warn("[Wrapkit] Heuristic re-detection also failed:", err);
               }
             }
-            setProcessingStatus(null);
 
             if (detectedFields.length === 0) {
               showToast("No fields detected.", "info");

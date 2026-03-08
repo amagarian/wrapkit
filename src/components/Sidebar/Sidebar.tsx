@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { ProjectList } from "../ProjectList/ProjectList";
 import styles from "./Sidebar.module.css";
 
@@ -39,6 +39,28 @@ export function Sidebar({ projects, selectedId, onSelect, onNewProject }: Sideba
       setUpdateStatus("error");
       setTimeout(() => { setUpdateStatus("idle"); setErrorDetail(null); }, 8000);
     }
+  }, []);
+
+  // Auto-check for updates on startup (silent — only shows UI if an update is found)
+  useEffect(() => {
+    let cancelled = false;
+    const autoCheck = async () => {
+      try {
+        const { check } = await import("@tauri-apps/plugin-updater");
+        const update = await check();
+        if (cancelled) return;
+        if (update) {
+          setUpdateStatus("downloading");
+          await update.downloadAndInstall();
+          const { relaunch } = await import("@tauri-apps/plugin-process");
+          await relaunch();
+        }
+      } catch {
+        // Silent failure on auto-check — user can still manually check
+      }
+    };
+    const timer = setTimeout(autoCheck, 2000);
+    return () => { cancelled = true; clearTimeout(timer); };
   }, []);
 
   const updateLabel =

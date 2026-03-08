@@ -25,7 +25,10 @@ export function FillPromptModal({
   onClose,
   onSubmit,
 }: FillPromptModalProps) {
-  const promptFields = useMemo(() => getPromptFields(template), [template]);
+  const allPromptFields = useMemo(() => getPromptFields(template), [template]);
+  const requiredFields = useMemo(() => allPromptFields.filter((f) => !f.optional), [allPromptFields]);
+  const optionalFields = useMemo(() => allPromptFields.filter((f) => f.optional), [allPromptFields]);
+  const promptFields = allPromptFields;
   const [values, setValues] = useState<PromptFieldValues>(() =>
     Object.fromEntries(promptFields.map((field) => [field.id, initialValues[field.id] ?? ""]))
   );
@@ -82,7 +85,7 @@ export function FillPromptModal({
           )}
 
           <div className={styles.fieldsPane}>
-            {promptFields.map((field) => {
+            {requiredFields.map((field) => {
               const isCheckbox =
                 field.fieldType === "checkbox" ||
                 field.fieldKind === "boolean-checkbox";
@@ -130,6 +133,65 @@ export function FillPromptModal({
                 </label>
               );
             })}
+
+            {optionalFields.length > 0 && (
+              <>
+                <div className={styles.sectionDivider}>
+                  <span className={styles.sectionLabel}>Optional — if applicable</span>
+                </div>
+                {optionalFields.map((field) => {
+                  const isCheckbox =
+                    field.fieldType === "checkbox" ||
+                    field.fieldKind === "boolean-checkbox";
+
+                  return (
+                    <label
+                      key={field.id}
+                      className={`${styles.row} ${styles.rowOptional} ${field.id === activeFieldId ? styles.rowActive : ""}`}
+                      onClick={() => setActiveFieldId(field.id)}
+                    >
+                      <span className={styles.label}>
+                        {getTemplateFieldPromptLabel(field)}
+                        <span className={styles.optionalTag}>Optional</span>
+                      </span>
+                      {isCheckbox ? (
+                        <div className={styles.checkboxRow}>
+                          <input
+                            type="checkbox"
+                            className={styles.checkbox}
+                            checked={values[field.id] === "yes"}
+                            onFocus={() => setActiveFieldId(field.id)}
+                            onChange={(e) =>
+                              setValues((prev) => ({
+                                ...prev,
+                                [field.id]: e.target.checked ? "yes" : "",
+                              }))
+                            }
+                          />
+                          <span className={styles.checkboxLabel}>
+                            {values[field.id] === "yes" ? "Checked" : "Unchecked"}
+                          </span>
+                        </div>
+                      ) : (
+                        <input
+                          type="text"
+                          className={styles.input}
+                          value={values[field.id] ?? ""}
+                          placeholder={`${field.label} (optional)`}
+                          onFocus={() => setActiveFieldId(field.id)}
+                          onChange={(e) =>
+                            setValues((prev) => ({
+                              ...prev,
+                              [field.id]: e.target.value,
+                            }))
+                          }
+                        />
+                      )}
+                    </label>
+                  );
+                })}
+              </>
+            )}
           </div>
         </div>
 

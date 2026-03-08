@@ -6,7 +6,6 @@ import styles from "./ProjectWorkspace.module.css";
 interface ProjectWorkspaceProps {
   project: Project | null;
   documents: ProjectDocument[];
-  processingStatus?: string | null;
   onPdfDrop: (files: File[] | null) => void;
   onEditProject: () => void;
   onDeleteProject: () => void;
@@ -26,7 +25,6 @@ const SUMMARY_FIELDS: { key: keyof Project; label: string }[] = [
 export function ProjectWorkspace({
   project,
   documents,
-  processingStatus,
   onPdfDrop,
   onEditProject,
   onDeleteProject,
@@ -94,20 +92,6 @@ export function ProjectWorkspace({
       <div className={styles.dropSection}>
         <PdfDropzone onDrop={onPdfDrop} />
       </div>
-
-      {processingStatus && (
-        <div className={styles.processingOverlay}>
-          <div className={styles.processingCard}>
-            <div className={styles.spinner} />
-            <div className={styles.processingContent}>
-              <span className={styles.processingText}>No existing template found</span>
-              <span className={styles.processingNote}>
-                Analyzing with AI — this may take up to 30 seconds.
-              </span>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

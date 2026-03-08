@@ -96,6 +96,7 @@ For every field, the "label" must be a short, human-readable name derived from t
 8. List fields top-to-bottom in the order they appear on the form.
 9. For "Company / Contact" style combined labels, map to the best canonical ID (usually "productionCompany").
 10. Fields labeled just "Name" in a credit card section should map to "creditCardHolder".
+11. OPTIONAL FIELDS: If a field is inside a section marked "if applicable", "optional", "3rd party agreement", or any other conditional/optional section, set "optional" to true. Fields in the main/primary section should have "optional" set to false.
 
 Return ONLY valid JSON:
 {
@@ -107,7 +108,8 @@ Return ONLY valid JSON:
       "fieldType": "text",
       "fieldKind": "text",
       "checkboxValue": null,
-      "groupId": null
+      "groupId": null,
+      "optional": false
     }
   ],
   "pageDescription": "Brief description of form type"

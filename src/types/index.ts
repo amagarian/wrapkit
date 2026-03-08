@@ -111,6 +111,8 @@ export interface TemplateField {
   customValue?: string;
   /** Prompt label shown when this field is collected at fill time. */
   promptLabel?: string;
+  /** True if field is in an optional/conditional section (e.g. "if applicable"). */
+  optional?: boolean;
 }
 
 export type TemplateRegistrySource =
@@ -220,7 +222,7 @@ export interface TemplateSubmission {
   notes?: string;
 }
 
-export type ProjectDocumentStatus = "pending" | "matched" | "filled";
+export type ProjectDocumentStatus = "pending" | "processing" | "matched" | "filled";
 
 export interface ProjectDocument {
   id: string;
@@ -230,6 +232,7 @@ export interface ProjectDocument {
   matchResult?: PdfMatchResult;
   pdfBytes?: Uint8Array;
   status: ProjectDocumentStatus;
+  processingMessage?: string;
   createdAt: string;
   updatedAt: string;
 }

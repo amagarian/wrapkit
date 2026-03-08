@@ -53,6 +53,7 @@ export const CANONICAL_FIELD_DEFINITIONS: CanonicalFieldDefinition[] = [
     fieldKind: "date",
     aliases: ["authorization date", "auth date"],
     sectionHints: ["authorization", "signature", "footer"],
+    allowDuplicates: true,
   },
   {
     id: "productionCompany",
