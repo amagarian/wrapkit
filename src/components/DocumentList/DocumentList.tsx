@@ -46,26 +46,22 @@ export function DocumentList({ documents, onOpen, onDownload, onEditTemplate, on
                 >
                   Edit Template
                 </button>
-                {isFilled && (
-                  <>
-                    <button
-                      type="button"
-                      className={styles.previewBtn}
-                      onClick={() => onPreview(doc)}
-                      title="Preview filled PDF"
-                    >
-                      Preview
-                    </button>
-                    <button
-                      type="button"
-                      className={styles.downloadBtn}
-                      onClick={() => onDownload(doc)}
-                      title="Download filled PDF"
-                    >
-                      Download
-                    </button>
-                  </>
-                )}
+                <button
+                  type="button"
+                  className={styles.previewBtn}
+                  onClick={() => onPreview(doc)}
+                  title="Preview filled PDF"
+                >
+                  Preview
+                </button>
+                <button
+                  type="button"
+                  className={styles.downloadBtn}
+                  onClick={() => onDownload(doc)}
+                  title="Download filled PDF"
+                >
+                  Download
+                </button>
               </>
             )}
 

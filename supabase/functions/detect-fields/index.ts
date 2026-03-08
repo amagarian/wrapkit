@@ -72,6 +72,8 @@ This has TWO fields: a checkbox and a text field labeled "Job name".
 
 You MUST detect each fill-in blank as its own text field with the correct label from the form (e.g. "Ship date", "Order#", "Job name"). Use nearbyText matching the exact printed label.
 
+IMPORTANT: These checkbox-associated fill-in text fields are contextual — they are NOT the main "Job Name" or "Order #" fields on the form. They must have canonicalFieldId set to null, NOT to "jobName" or "poNumber". Only the primary standalone fields should use canonical IDs.
+
 ## LABEL RULES
 
 For every field, the "label" must be a short, human-readable name derived from the form's printed text:

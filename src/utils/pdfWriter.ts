@@ -118,7 +118,7 @@ export async function writeFilledPdfBytes(
 
       page.drawText(value, {
         x: x + 3,
-        y: yPdfBottom + Math.max(2, (field.height - sigFontSize) / 2),
+        y: yPdfBottom + Math.max(4, (field.height - sigFontSize) / 2) + 2,
         size: sigFontSize,
         font: signatureFont,
         color: rgb(0.08, 0.08, 0.08),
@@ -133,7 +133,7 @@ export async function writeFilledPdfBytes(
 
       page.drawText(value, {
         x: x + 3,
-        y: yPdfBottom + Math.max(2, (field.height - fontSize) / 2),
+        y: yPdfBottom + Math.max(4, (field.height - fontSize) / 2) + 2,
         size: fontSize,
         font,
         color: rgb(0.1, 0.1, 0.1),
