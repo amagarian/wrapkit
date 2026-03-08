@@ -32,6 +32,11 @@ c['bundle']['macOS']['signingIdentity'] = None
 json.dump(c, open('src-tauri/tauri.conf.json','w'), indent=2)
 "
 
+# Eject any stale DMG volumes
+for vol in /Volumes/dmg.*; do
+  [ -d "$vol" ] && hdiutil detach "$vol" 2>/dev/null || true
+done
+
 echo "==> Building (without Tauri signing)..."
 env -u CI npx tauri build
 
