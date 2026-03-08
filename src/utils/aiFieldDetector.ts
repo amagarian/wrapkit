@@ -25,6 +25,21 @@ interface AiDetectionResponse {
   pageDescription?: string;
 }
 
+interface GeminiField {
+  box_2d: [number, number, number, number]; // [y_min, x_min, y_max, x_max] normalized 0-1000
+  canonicalFieldId: string | null;
+  label: string;
+  fieldType: "text" | "checkbox";
+  fieldKind: TemplateFieldKind;
+  checkboxValue?: string | null;
+  groupId?: string | null;
+}
+
+interface GeminiDetectionResponse {
+  fields: GeminiField[];
+  pageDescription?: string;
+}
+
 interface DocAIField {
   label: string;
   canonicalFieldId: string | null;
@@ -80,6 +95,199 @@ function getSupabaseAnonKey(): string {
   return key;
 }
 
+async function callVisualMatchEdgeFunction(
+  base64Image: string,
+  geometryList: string
+): Promise<VisualMatchResponse> {
+  const url = getEdgeFunctionUrl("v5");
+  const anonKey = getSupabaseAnonKey();
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${anonKey}`,
+      apikey: anonKey,
+    },
+    body: JSON.stringify({ image: base64Image, geometryList }),
+  });
+
+  if (!response.ok) {
+    const errBody = await response.text();
+    throw new Error(`Visual match edge function error (${response.status}): ${errBody}`);
+  }
+
+  return response.json();
+}
+
+function isLikelyFillGeometry(
+  geo: GeometryCandidate,
+  pageWidth: number,
+  pageHeight: number
+): boolean {
+  if (geo.source === "acroform") return true;
+  if (geo.source === "glyph-checkbox") return true;
+  if (geo.source === "text-inline") return true;
+
+  if (geo.width > pageWidth * 0.85) return false;
+
+  const area = geo.width * geo.height;
+  if (area > pageWidth * pageHeight * 0.15) return false;
+
+  if (geo.width < 8 && geo.height < 8) return false;
+
+  if (geo.kind === "box") return geo.width >= 6 && geo.height >= 6;
+  if (geo.kind === "underline") return geo.width >= 15;
+  if (geo.kind === "widget") return geo.width >= 10 || geo.height >= 10;
+
+  if (geo.height < 3 && geo.width >= 30) return true;
+
+  return geo.width >= 15;
+}
+
+function findNearbyLabel(
+  geo: GeometryCandidate,
+  context: DetectionContext
+): string {
+  let bestText = "";
+  let bestDist = Infinity;
+
+  for (const item of context.textItems) {
+    if (item.pageNumber !== geo.pageNumber) continue;
+    if (item.text.length < 2) continue;
+
+    const itemCenterX = item.x + item.width / 2;
+    const geoCenterX = geo.x + geo.width / 2;
+    const itemCenterY = item.y + item.height / 2;
+    const geoCenterY = geo.y + geo.height / 2;
+
+    const hOverlap = Math.max(
+      0,
+      Math.min(item.x + item.width, geo.x + geo.width) - Math.max(item.x, geo.x)
+    );
+    const horizontallyNear = hOverlap > 0 || Math.abs(itemCenterX - geoCenterX) < geo.width;
+    if (!horizontallyNear && Math.abs(item.x - geo.x) > 80) continue;
+
+    const belowDist = (item.y - (geo.y + geo.height));
+    if (belowDist >= -5 && belowDist <= 25) {
+      const dist = Math.abs(belowDist) + Math.abs(itemCenterX - geoCenterX) * 0.3;
+      if (dist < bestDist) { bestDist = dist; bestText = item.text; }
+    }
+
+    const leftDist = geo.x - (item.x + item.width);
+    if (leftDist >= -5 && leftDist <= 30 && Math.abs(itemCenterY - geoCenterY) < 15) {
+      const dist = Math.abs(leftDist) + Math.abs(itemCenterY - geoCenterY) * 0.5;
+      if (dist < bestDist) { bestDist = dist; bestText = item.text; }
+    }
+
+    const aboveDist = geo.y - (item.y + item.height);
+    if (aboveDist >= -5 && aboveDist <= 20 && hOverlap > 0) {
+      const dist = Math.abs(aboveDist) + Math.abs(itemCenterX - geoCenterX) * 0.3 + 5;
+      if (dist < bestDist) { bestDist = dist; bestText = item.text; }
+    }
+  }
+
+  return bestText;
+}
+
+async function renderAnnotatedPage(
+  pdfBytes: Uint8Array,
+  pageNumber: number,
+  context: DetectionContext,
+  dpi: number = 300
+): Promise<{ annotatedBase64: string; markerMap: Map<number, GeometryCandidate>; geometryListText: string }> {
+  const bytesCopy = new Uint8Array(pdfBytes);
+  const loadingTask = pdfjsLib.getDocument({ data: bytesCopy });
+  const pdf = await loadingTask.promise;
+  const page = await pdf.getPage(pageNumber);
+
+  const scale = dpi / 72;
+  const scaledViewport = page.getViewport({ scale });
+
+  const canvas = document.createElement("canvas");
+  canvas.width = scaledViewport.width;
+  canvas.height = scaledViewport.height;
+  const ctx = canvas.getContext("2d")!;
+
+  await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise;
+
+  const fillCandidates = context.geometryCandidates.filter(
+    (g) => g.pageNumber === pageNumber && isLikelyFillGeometry(g, context.pageWidth, context.pageHeight)
+  );
+
+  console.log(
+    `[Wrapkit Visual] Filtered ${context.geometryCandidates.length} geometry → ${fillCandidates.length} fill candidates`
+  );
+
+  const markerMap = new Map<number, GeometryCandidate>();
+  const geometryLines: string[] = [];
+  let markerNum = 0;
+
+  for (const geo of fillCandidates) {
+    const px = geo.x * scale;
+    const py = geo.y * scale;
+    const pw = geo.width * scale;
+    const ph = geo.height * scale;
+
+    const isCheckbox = geo.kind === "box" || (geo.kind === "widget" && geo.width <= 28 && geo.height <= 28);
+    const markerColor = isCheckbox ? "rgba(30, 130, 220, 0.9)" : "rgba(220, 30, 30, 0.9)";
+    const highlightColor = isCheckbox ? "rgba(30, 130, 220, 0.4)" : "rgba(220, 30, 30, 0.3)";
+
+    ctx.save();
+
+    ctx.strokeStyle = highlightColor;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(px, py, pw, ph);
+
+    const radius = Math.max(9, 12 * (dpi / 300));
+    const markerX = px + pw / 2;
+    const markerY = Math.max(radius + 2, py - radius - 3);
+
+    ctx.fillStyle = "#FFFFFF";
+    ctx.beginPath();
+    ctx.arc(markerX, markerY, radius + 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = markerColor;
+    ctx.beginPath();
+    ctx.arc(markerX, markerY, radius, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#FFFFFF";
+    const fontSize = markerNum >= 10 ? Math.round(radius * 0.95) : Math.round(radius * 1.15);
+    ctx.font = `bold ${fontSize}px Arial`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(String(markerNum), markerX, markerY);
+
+    ctx.restore();
+
+    markerMap.set(markerNum, geo);
+
+    const nearbyText = findNearbyLabel(geo, context);
+    const nearbyPart = nearbyText ? `, near text "${nearbyText}"` : "";
+    const typePart = isCheckbox ? "checkbox" : geo.kind;
+
+    geometryLines.push(
+      `#${markerNum}: ${typePart} at (${Math.round(geo.x)}, ${Math.round(geo.y)}), ` +
+      `size ${Math.round(geo.width)}x${Math.round(geo.height)}${nearbyPart}`
+    );
+    markerNum++;
+  }
+
+  const dataUrl = canvas.toDataURL("image/png");
+  const annotatedBase64 = dataUrl.replace(/^data:image\/png;base64,/, "");
+
+  canvas.width = 0;
+  canvas.height = 0;
+  pdf.destroy();
+
+  return {
+    annotatedBase64,
+    markerMap,
+    geometryListText: geometryLines.join("\n"),
+  };
+}
 
 async function renderPageToBase64(pdfBytes: Uint8Array, pageNumber: number, dpi: number = 150): Promise<string> {
   const bytesCopy = new Uint8Array(pdfBytes);
@@ -129,6 +337,50 @@ async function callEdgeFunction(base64Image: string, fileName: string): Promise<
   return response.json();
 }
 
+async function callGeminiEdgeFunction(base64Image: string, fileName: string): Promise<GeminiDetectionResponse> {
+  const url = getEdgeFunctionUrl("v2");
+  const anonKey = getSupabaseAnonKey();
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${anonKey}`,
+      apikey: anonKey,
+    },
+    body: JSON.stringify({ image: base64Image, fileName }),
+  });
+
+  if (!response.ok) {
+    const errBody = await response.text();
+    throw new Error(`Gemini edge function error (${response.status}): ${errBody}`);
+  }
+
+  return response.json();
+}
+
+async function callDocAIEdgeFunction(base64Image: string): Promise<DocAIDetectionResponse> {
+  const url = getEdgeFunctionUrl("v3");
+  const anonKey = getSupabaseAnonKey();
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${anonKey}`,
+      apikey: anonKey,
+    },
+    body: JSON.stringify({ image: base64Image }),
+  });
+
+  if (!response.ok) {
+    const errBody = await response.text();
+    throw new Error(`DocAI edge function error (${response.status}): ${errBody}`);
+  }
+
+  return response.json();
+}
+
 async function callAzureEdgeFunction(base64Image: string): Promise<DocAIDetectionResponse> {
   const url = getEdgeFunctionUrl("v4");
   const anonKey = getSupabaseAnonKey();
@@ -149,238 +401,6 @@ async function callAzureEdgeFunction(base64Image: string): Promise<DocAIDetectio
   }
 
   return response.json();
-}
-
-async function callVisualMatchEdgeFunction(
-  base64Image: string,
-  geometryList: string
-): Promise<VisualMatchResponse> {
-  const url = getEdgeFunctionUrl("v5");
-  const anonKey = getSupabaseAnonKey();
-
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${anonKey}`,
-      apikey: anonKey,
-    },
-    body: JSON.stringify({ image: base64Image, geometryList }),
-  });
-
-  if (!response.ok) {
-    const errBody = await response.text();
-    throw new Error(`Visual match edge function error (${response.status}): ${errBody}`);
-  }
-
-  return response.json();
-}
-
-/**
- * Determine whether a geometry candidate is likely a fillable area
- * (text input, checkbox, signature line) rather than decorative chrome.
- */
-function isLikelyFillGeometry(
-  geo: GeometryCandidate,
-  pageWidth: number,
-  pageHeight: number
-): boolean {
-  // AcroForm widgets are always relevant
-  if (geo.source === "acroform") return true;
-  // Glyph checkboxes are always relevant
-  if (geo.source === "glyph-checkbox") return true;
-  // Inline underscores from text are relevant
-  if (geo.source === "text-inline") return true;
-
-  // Skip elements spanning nearly the full page width (borders, headers, section bars)
-  if (geo.width > pageWidth * 0.85) return false;
-
-  // Skip very large rectangles that are likely background fills or section boxes
-  const area = geo.width * geo.height;
-  if (area > pageWidth * pageHeight * 0.15) return false;
-
-  // Skip very small geometry that's unlikely to be a fill area or checkbox
-  if (geo.width < 8 && geo.height < 8) return false;
-
-  // Small boxes are likely checkboxes
-  if (geo.kind === "box") return geo.width >= 6 && geo.height >= 6;
-
-  // Underlines: thin horizontal lines are often fill areas (signature lines, text
-  // entry underlines) — keep anything with reasonable width regardless of height
-  if (geo.kind === "underline") return geo.width >= 15;
-
-  // Widgets: keep if not tiny
-  if (geo.kind === "widget") return geo.width >= 10 || geo.height >= 10;
-
-  // General geometry: keep lines/shapes with reasonable width
-  // Thin horizontal lines (height < 3) with decent width are likely fill underlines
-  if (geo.height < 3 && geo.width >= 30) return true;
-
-  return geo.width >= 15;
-}
-
-/**
- * Find the nearest text label for a geometry candidate.
- * Checks below, to the left, and above the geometry element.
- */
-function findNearbyLabel(
-  geo: GeometryCandidate,
-  context: DetectionContext
-): string {
-  let bestText = "";
-  let bestDist = Infinity;
-
-  for (const item of context.textItems) {
-    if (item.pageNumber !== geo.pageNumber) continue;
-    if (item.text.length < 2) continue;
-
-    const itemCenterX = item.x + item.width / 2;
-    const geoCenterX = geo.x + geo.width / 2;
-    const itemCenterY = item.y + item.height / 2;
-    const geoCenterY = geo.y + geo.height / 2;
-
-    // Only consider text that's horizontally near or overlapping with the geometry
-    const hOverlap = Math.max(
-      0,
-      Math.min(item.x + item.width, geo.x + geo.width) - Math.max(item.x, geo.x)
-    );
-    const horizontallyNear = hOverlap > 0 || Math.abs(itemCenterX - geoCenterX) < geo.width;
-    if (!horizontallyNear && Math.abs(item.x - geo.x) > 80) continue;
-
-    // Text below geometry (label below fill area)
-    const belowDist = (item.y - (geo.y + geo.height));
-    if (belowDist >= -5 && belowDist <= 25) {
-      const dist = Math.abs(belowDist) + Math.abs(itemCenterX - geoCenterX) * 0.3;
-      if (dist < bestDist) { bestDist = dist; bestText = item.text; }
-    }
-
-    // Text to the left of geometry (label left of fill area)
-    const leftDist = geo.x - (item.x + item.width);
-    if (leftDist >= -5 && leftDist <= 30 && Math.abs(itemCenterY - geoCenterY) < 15) {
-      const dist = Math.abs(leftDist) + Math.abs(itemCenterY - geoCenterY) * 0.5;
-      if (dist < bestDist) { bestDist = dist; bestText = item.text; }
-    }
-
-    // Text above geometry (less common but possible)
-    const aboveDist = geo.y - (item.y + item.height);
-    if (aboveDist >= -5 && aboveDist <= 20 && hOverlap > 0) {
-      const dist = Math.abs(aboveDist) + Math.abs(itemCenterX - geoCenterX) * 0.3 + 5;
-      if (dist < bestDist) { bestDist = dist; bestText = item.text; }
-    }
-  }
-
-  return bestText;
-}
-
-/**
- * Render the PDF page with numbered markers on likely fill areas.
- * Pre-filters geometry to skip decorative elements, includes nearby text
- * labels in the geometry list for GPT-4o context.
- */
-async function renderAnnotatedPage(
-  pdfBytes: Uint8Array,
-  pageNumber: number,
-  context: DetectionContext,
-  dpi: number = 300
-): Promise<{ annotatedBase64: string; markerMap: Map<number, GeometryCandidate>; geometryListText: string }> {
-  const bytesCopy = new Uint8Array(pdfBytes);
-  const loadingTask = pdfjsLib.getDocument({ data: bytesCopy });
-  const pdf = await loadingTask.promise;
-  const page = await pdf.getPage(pageNumber);
-
-  const scale = dpi / 72;
-  const scaledViewport = page.getViewport({ scale });
-
-  const canvas = document.createElement("canvas");
-  canvas.width = scaledViewport.width;
-  canvas.height = scaledViewport.height;
-  const ctx = canvas.getContext("2d")!;
-
-  await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise;
-
-  // Filter to only likely fill areas
-  const fillCandidates = context.geometryCandidates.filter(
-    (g) => g.pageNumber === pageNumber && isLikelyFillGeometry(g, context.pageWidth, context.pageHeight)
-  );
-
-  console.log(
-    `[Wrapkit Visual] Filtered ${context.geometryCandidates.length} geometry → ${fillCandidates.length} fill candidates`
-  );
-
-  const markerMap = new Map<number, GeometryCandidate>();
-  const geometryLines: string[] = [];
-  let markerNum = 0;
-
-  for (const geo of fillCandidates) {
-    const px = geo.x * scale;
-    const py = geo.y * scale;
-    const pw = geo.width * scale;
-    const ph = geo.height * scale;
-
-    const isCheckbox = geo.kind === "box" || (geo.kind === "widget" && geo.width <= 28 && geo.height <= 28);
-    const markerColor = isCheckbox ? "rgba(30, 130, 220, 0.9)" : "rgba(220, 30, 30, 0.9)";
-    const highlightColor = isCheckbox ? "rgba(30, 130, 220, 0.4)" : "rgba(220, 30, 30, 0.3)";
-
-    ctx.save();
-
-    // Draw a highlight rectangle on the geometry
-    ctx.strokeStyle = highlightColor;
-    ctx.lineWidth = 2;
-    ctx.strokeRect(px, py, pw, ph);
-
-    // Draw numbered marker ABOVE the geometry (so it doesn't obscure the form)
-    const radius = Math.max(9, 12 * (dpi / 300));
-    const markerX = px + pw / 2;
-    const markerY = Math.max(radius + 2, py - radius - 3);
-
-    // White background circle for contrast
-    ctx.fillStyle = "#FFFFFF";
-    ctx.beginPath();
-    ctx.arc(markerX, markerY, radius + 2, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Colored marker circle
-    ctx.fillStyle = markerColor;
-    ctx.beginPath();
-    ctx.arc(markerX, markerY, radius, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Number text
-    ctx.fillStyle = "#FFFFFF";
-    const fontSize = markerNum >= 10 ? Math.round(radius * 0.95) : Math.round(radius * 1.15);
-    ctx.font = `bold ${fontSize}px Arial`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(String(markerNum), markerX, markerY);
-
-    ctx.restore();
-
-    markerMap.set(markerNum, geo);
-
-    // Include nearby text label for context
-    const nearbyText = findNearbyLabel(geo, context);
-    const nearbyPart = nearbyText ? `, near text "${nearbyText}"` : "";
-    const typePart = isCheckbox ? "checkbox" : geo.kind;
-
-    geometryLines.push(
-      `#${markerNum}: ${typePart} at (${Math.round(geo.x)}, ${Math.round(geo.y)}), ` +
-      `size ${Math.round(geo.width)}x${Math.round(geo.height)}${nearbyPart}`
-    );
-    markerNum++;
-  }
-
-  const dataUrl = canvas.toDataURL("image/png");
-  const annotatedBase64 = dataUrl.replace(/^data:image\/png;base64,/, "");
-
-  canvas.width = 0;
-  canvas.height = 0;
-  pdf.destroy();
-
-  return {
-    annotatedBase64,
-    markerMap,
-    geometryListText: geometryLines.join("\n"),
-  };
 }
 
 function normalize(text: string): string {
@@ -637,7 +657,6 @@ const CREDIT_CARD_CHECKBOX_IDS = new Set([
   "creditCardTypeAmex",
 ]);
 
-
 const CARD_BRAND_SEARCHES: Record<string, string[]> = {
   creditCardTypeVisa: ["visa"],
   creditCardTypeMastercard: ["mastercard", "master card", "mc"],
@@ -852,12 +871,11 @@ function buildTemplateField(
     checkboxValue: aiField.checkboxValue ?? canonicalDef?.checkboxValue,
     groupId: aiField.groupId ?? canonicalDef?.groupId,
     promptLabel: (isBooleanCheckbox || isUnmappedText) ? fieldLabel : undefined,
-    optional: aiField.optional || undefined,
   };
 }
 
 
-// --------------- Visual Geometry Matching (GPT-4o + numbered markers) ---------------
+// --------------- Visual Geometry Matching detection ---------------
 
 async function detectFieldsWithVisualMatching(
   pdfBytes: Uint8Array,
@@ -934,7 +952,6 @@ async function detectFieldsWithVisualMatching(
         height: Math.min(18, Math.max(10, geo.height)),
       };
     } else {
-      // For text fields on underlines, offset upward to create the text entry area
       const baselinePad = geo.kind === "underline" ? 12 : 4;
       const correctedY = Math.max(0, geo.y - baselinePad);
       const geoBottom = geo.y + geo.height;
@@ -948,7 +965,6 @@ async function detectFieldsWithVisualMatching(
       };
     }
 
-    // Clamp to page bounds
     coords.x = Math.max(0, coords.x);
     coords.y = Math.max(0, coords.y);
     if (coords.x + coords.width > context.pageWidth) {
@@ -975,8 +991,7 @@ async function detectFieldsWithVisualMatching(
     templateFields.push(field);
   }
 
-  // Card-type checkbox refinement: if GPT-4o matched card types, try to refine using
-  // the proven positionCardTypeCheckboxes logic for more precise box placement
+  // Card-type checkbox refinement
   const cardFields = templateFields.filter(
     (f) => f.canonicalFieldId && CREDIT_CARD_CHECKBOX_IDS.has(f.canonicalFieldId)
   );
@@ -1007,65 +1022,6 @@ async function detectFieldsWithVisualMatching(
   if (supplementalCheckboxes.length > 0) {
     console.log(`[Wrapkit Visual] Found ${supplementalCheckboxes.length} additional checkbox(es) from sweep`);
     templateFields.push(...supplementalCheckboxes);
-  }
-
-  // --- Supplemental pass: catch KNOWN fields GPT-4o missed ---
-  // Only adds fields with a recognized canonical ID to avoid false positives
-  // from paragraph text blanks (e.g. "I, _______, hereby authorize...")
-  try {
-    onStatus?.("Checking for missed fields…");
-    const plainBase64 = await renderPageToBase64(pdfBytes, pageNumber);
-    const v1Response = await callEdgeFunction(plainBase64, "");
-    const v1Fields = v1Response.fields ?? [];
-
-    const matchedCanonicalIds = new Set<string>(
-      templateFields.filter((f) => f.canonicalFieldId).map((f) => f.canonicalFieldId as string)
-    );
-
-    let supplementCount = 0;
-    for (const v1f of v1Fields) {
-      // Only add fields with a recognized canonical ID — this filters out
-      // spurious paragraph-text blanks and keeps only known field types
-      if (!v1f.canonicalFieldId || !VALID_CANONICAL_IDS.has(v1f.canonicalFieldId)) continue;
-
-      // Skip if already matched
-      if (matchedCanonicalIds.has(v1f.canonicalFieldId)) continue;
-
-      // Skip credit card checkboxes — already handled by visual matching
-      if (CREDIT_CARD_CHECKBOX_IDS.has(v1f.canonicalFieldId)) continue;
-
-      if (v1f.fieldType === "checkbox") {
-        const coords = findCheckboxGeometry(v1f, context, usedGeoIds);
-        if (!coords) continue;
-
-        templateFields.push(buildTemplateField(v1f, coords, templateFields.length, pageNumber));
-        supplementCount++;
-      } else {
-        const match = findLabelInContext(v1f, context);
-        if (!match) continue;
-
-        const coords = findFillArea(match.line, match.labelItem, context, usedGeoIds);
-        if (!coords) continue;
-
-        coords.x = Math.max(0, coords.x);
-        coords.y = Math.max(0, coords.y);
-        if (coords.x + coords.width > context.pageWidth) {
-          coords.width = context.pageWidth - coords.x;
-        }
-
-        templateFields.push(buildTemplateField(v1f, coords, templateFields.length, pageNumber));
-        supplementCount++;
-      }
-
-      matchedCanonicalIds.add(v1f.canonicalFieldId);
-      console.log(`[Wrapkit Visual] Supplemental: added "${v1f.label}" (${v1f.canonicalFieldId})`);
-    }
-
-    if (supplementCount > 0) {
-      console.log(`[Wrapkit Visual] Supplemental pass added ${supplementCount} missed canonical field(s)`);
-    }
-  } catch (err) {
-    console.warn("[Wrapkit Visual] Supplemental pass failed (non-critical):", err);
   }
 
   console.log(`[Wrapkit Visual] Produced ${templateFields.length} total template fields`);
@@ -1232,318 +1188,318 @@ async function detectFieldsWithAzure(
   return dedupeFields(templateFields);
 }
 
-// --------------- Apryse Data Extraction Server ---------------
+// --------------- Document AI detection ---------------
 
-interface ApryseAcroFormField {
-  name: string;
-  type: string;
-  value: string;
-  rect: { x: number; y: number; width: number; height: number };
-  pdfRect: [number, number, number, number];
-}
-
-interface ApryseFormField {
-  type: string;
-  confidence: number;
-  rect: { x: number; y: number; width: number; height: number };
-  rawRect: [number, number, number, number];
-}
-
-interface ApryseKVField {
-  label: string;
-  value: string;
-  confidence: number;
-  rect: { x: number; y: number; width: number; height: number };
-  keyRect: { x: number; y: number; width: number; height: number } | null;
-  rawRect: [number, number, number, number];
-}
-
-interface ApryseResponse {
-  method: string;
-  acroFormFields: ApryseAcroFormField[];
-  formFields: ApryseFormField[];
-  kvFields: ApryseKVField[];
-  pageWidth: number;
-  pageHeight: number;
-  elapsedMs: number;
-}
-
-function getApryseServerUrl(): string {
-  const url = import.meta.env.VITE_APRYSE_SERVER_URL as string;
-  if (!url) throw new Error("VITE_APRYSE_SERVER_URL not configured");
-  return url.replace(/\/$/, "");
-}
-
-async function callApryseServer(pdfBase64: string, page: number): Promise<ApryseResponse> {
-  const url = `${getApryseServerUrl()}/extract-fields`;
-  const resp = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ pdfBase64, page }),
-  });
-  if (!resp.ok) {
-    const detail = await resp.text().catch(() => "");
-    throw new Error(`Apryse server error ${resp.status}: ${detail}`);
-  }
-  return resp.json();
-}
-
-function matchCanonicalId(label: string): string | null {
-  const lower = label.toLowerCase().trim();
-  for (const def of CANONICAL_FIELD_DEFINITIONS) {
-    if (def.id === lower) return def.id;
-    if (def.label.toLowerCase() === lower) return def.id;
-    for (const alias of def.aliases) {
-      if (alias.toLowerCase() === lower) return def.id;
-    }
-  }
-  // Fuzzy: check if label contains any alias
-  for (const def of CANONICAL_FIELD_DEFINITIONS) {
-    for (const alias of def.aliases) {
-      if (lower.includes(alias.toLowerCase()) && alias.length >= 3) return def.id;
-    }
-    if (lower.includes(def.label.toLowerCase()) && def.label.length >= 3) return def.id;
-  }
-  return null;
-}
-
-function apryseFieldTypeToWrapkit(
-  apryseType: string
-): { fieldType: "text" | "checkbox"; fieldKind: TemplateFieldKind } {
-  switch (apryseType) {
-    case "checkbox":
-    case "formCheckBox":
-      return { fieldType: "checkbox", fieldKind: "boolean-checkbox" };
-    case "radio":
-    case "formRadioButton":
-      return { fieldType: "checkbox", fieldKind: "checkbox-group" };
-    case "signature":
-    case "formDigitalSignature":
-      return { fieldType: "text", fieldKind: "signature" };
-    default:
-      return { fieldType: "text", fieldKind: "text" };
-  }
-}
-
-async function detectFieldsWithApryse(
+export async function _detectFieldsWithDocAI(
   pdfBytes: Uint8Array,
   pageNumber: number,
   onStatus?: (status: string) => void
 ): Promise<TemplateField[]> {
-  console.log("[Wrapkit Apryse] Starting Apryse Data Extraction…");
-  onStatus?.("Sending to Apryse server…");
+  console.log("[Wrapkit DocAI] Starting Document AI + Gemini hybrid detection...");
+  onStatus?.("Rendering PDF…");
 
-  const pdfBase64 = btoa(
-    Array.from(pdfBytes, (b) => String.fromCharCode(b)).join("")
-  );
+  const base64 = await renderPageToBase64(pdfBytes, pageNumber, 300);
 
-  const data = await callApryseServer(pdfBase64, pageNumber);
-  console.log(
-    `[Wrapkit Apryse] Got ${data.acroFormFields.length} AcroForm, ` +
-    `${data.formFields.length} detected, ${data.kvFields.length} KV fields ` +
-    `(${data.elapsedMs}ms server-side)`
-  );
+  onStatus?.("Analyzing form with Document AI…");
+  const response = await callDocAIEdgeFunction(base64);
+  const docAIFields = response.fields ?? [];
+  console.log(`[Wrapkit DocAI] Received ${docAIFields.length} field(s) from DocAI + Gemini`);
 
-  onStatus?.("Processing Apryse results…");
+  if (docAIFields.length === 0) return [];
 
+  onStatus?.("Building template fields…");
+
+  // Get page dimensions for coordinate conversion
+  const bytesCopy = new Uint8Array(pdfBytes);
+  const loadingTask = pdfjsLib.getDocument({ data: bytesCopy });
+  const pdf = await loadingTask.promise;
+  const page = await pdf.getPage(pageNumber);
+  const viewport = page.getViewport({ scale: 1 });
+  const pageWidth = viewport.width;
+  const pageHeight = viewport.height;
+  pdf.destroy();
+
+  console.log(`[Wrapkit DocAI] Page dimensions: ${pageWidth}x${pageHeight} (PDF units)`);
+
+  const seenCanonicalIds = new Set<string>();
   const templateFields: TemplateField[] = [];
-  const usedRects = new Set<string>();
-  const rectKey = (r: { x: number; y: number; width: number; height: number }) =>
-    `${Math.round(r.x)},${Math.round(r.y)},${Math.round(r.width)},${Math.round(r.height)}`;
 
-  // Priority 1: AcroForm fields — these are 100% accurate interactive form widgets
-  if (data.acroFormFields.length > 0) {
-    console.log("[Wrapkit Apryse] Using AcroForm fields (interactive PDF form widgets)");
-    for (const af of data.acroFormFields) {
-      if (af.type === "button") continue;
+  for (let i = 0; i < docAIFields.length; i++) {
+    const df = docAIFields[i];
 
-      // Skip garbage fields: "undefined" names, empty names, paragraph-length names
-      if (!af.name || af.name === "undefined" || af.name.length > 40) {
-        console.log(`[Wrapkit Apryse] Skipping garbage AcroForm field: "${af.name?.slice(0, 50)}…"`);
+    if (df.canonicalFieldId) {
+      if (seenCanonicalIds.has(df.canonicalFieldId)) {
+        console.log(`[Wrapkit DocAI] Skipping duplicate: ${df.canonicalFieldId}`);
         continue;
       }
+      seenCanonicalIds.add(df.canonicalFieldId);
+    }
 
-      const { fieldType, fieldKind } = apryseFieldTypeToWrapkit(af.type);
-      const canonicalId = matchCanonicalId(af.name);
-      const canonicalDef = canonicalId
-        ? CANONICAL_FIELD_DEFINITIONS.find((d) => d.id === canonicalId)
+    // Convert normalized vertices (0-1) to PDF coordinates
+    const bb = df.boundingBox;
+    const x = bb.x * pageWidth;
+    const y = bb.y * pageHeight;
+    const width = Math.max(bb.width * pageWidth, 10);
+    const height = Math.max(bb.height * pageHeight, 12);
+
+    const canonicalId =
+      df.canonicalFieldId && VALID_CANONICAL_IDS.has(df.canonicalFieldId)
+        ? (df.canonicalFieldId as CanonicalFieldId)
         : undefined;
 
-      // Properly handle credit card type checkboxes
-      const isCardCheckbox = canonicalId && CREDIT_CARD_CHECKBOX_IDS.has(canonicalId);
-      const resolvedFieldKind: TemplateFieldKind = isCardCheckbox
-        ? "checkbox-group"
-        : (canonicalDef?.fieldKind ?? fieldKind);
-      const resolvedGroupId = isCardCheckbox ? "creditCardType" : (canonicalDef?.groupId ?? null);
-      const resolvedCheckboxValue = isCardCheckbox
-        ? (canonicalDef?.checkboxValue ?? af.name.toLowerCase())
-        : (fieldType === "checkbox" ? af.value || null : null);
-
-      const aiField: AiIdentifiedField = {
-        canonicalFieldId: canonicalId,
-        label: canonicalDef?.label || af.name,
-        nearbyText: af.name,
-        fieldType,
-        fieldKind: resolvedFieldKind,
-        checkboxValue: resolvedCheckboxValue,
-        groupId: resolvedGroupId,
-      };
-
-      const key = rectKey(af.rect);
-      if (usedRects.has(key)) continue;
-      usedRects.add(key);
-
-      templateFields.push(buildTemplateField(aiField, af.rect, templateFields.length, pageNumber));
-    }
-  }
-
-  // Priority 2: KV fields — have both geometry AND label text
-  for (const kv of data.kvFields) {
-    if (kv.confidence < 0.3) continue;
-    const key = rectKey(kv.rect);
-    if (usedRects.has(key)) continue;
-
-    const canonicalId = matchCanonicalId(kv.label);
     const canonicalDef = canonicalId
       ? CANONICAL_FIELD_DEFINITIONS.find((d) => d.id === canonicalId)
       : undefined;
 
-    const aiField: AiIdentifiedField = {
+    const isCardCheckbox = canonicalId && CREDIT_CARD_CHECKBOX_IDS.has(canonicalId);
+    const isBooleanCheckbox = df.fieldType === "checkbox" && !isCardCheckbox;
+
+    const catalogKey = canonicalDef?.mappedProjectKey ?? "";
+    const fieldLabel = df.label || canonicalDef?.label || `Field ${i + 1}`;
+    const isUnmappedText = !isBooleanCheckbox && !isCardCheckbox && !catalogKey;
+    const mappedKey = isBooleanCheckbox || isUnmappedText ? "__prompt__" : catalogKey;
+
+    const field: TemplateField = {
+      id: `docai-field-${Date.now()}-${i}`,
+      label: fieldLabel,
+      mappedProjectKey: (mappedKey || "") as TemplateField["mappedProjectKey"],
       canonicalFieldId: canonicalId,
-      label: canonicalDef?.label || kv.label || `Field ${templateFields.length + 1}`,
-      nearbyText: kv.label,
-      fieldType: "text",
-      fieldKind: canonicalDef?.fieldKind ?? "text",
-      checkboxValue: null,
-      groupId: canonicalDef?.groupId ?? null,
+      pageNumber,
+      x: Math.max(0, x),
+      y: Math.max(0, y),
+      width: Math.min(width, pageWidth - x),
+      height: Math.min(height, pageHeight - y),
+      confidence: 0.95,
+      fieldType: df.fieldType === "checkbox" ? "checkbox" : "text",
+      fieldKind: isBooleanCheckbox
+        ? "boolean-checkbox"
+        : (canonicalDef?.fieldKind ?? (df.fieldKind as TemplateFieldKind) ?? "text"),
+      detectionSource: "text-line",
+      checkboxValue: df.checkboxValue ?? canonicalDef?.checkboxValue,
+      groupId: df.groupId ?? canonicalDef?.groupId,
+      promptLabel: (isBooleanCheckbox || isUnmappedText) ? fieldLabel : undefined,
     };
 
-    usedRects.add(key);
-    templateFields.push(buildTemplateField(aiField, kv.rect, templateFields.length, pageNumber));
+    console.log(
+      `[Wrapkit DocAI] "${field.label}" → (${Math.round(field.x)}, ${Math.round(field.y)}) ${Math.round(field.width)}x${Math.round(field.height)}`
+    );
+    templateFields.push(field);
   }
 
-  // Priority 3: Form detection fields — geometry only (no labels)
-  // Use nearby text from PDF.js context to attempt labeling
-  if (templateFields.length < 3 && data.formFields.length > 0) {
-    const context = await buildDetectionContext(pdfBytes, pageNumber);
+  console.log(`[Wrapkit DocAI] Produced ${templateFields.length} template fields`);
+  return dedupeFields(templateFields);
+}
 
-    for (const ff of data.formFields) {
-      if (ff.confidence < 0.4) continue;
-      const key = rectKey(ff.rect);
-      if (usedRects.has(key)) continue;
+// --------------- Gemini-only detection helpers ---------------
 
-      // Try to find a text label near this detected field
-      let bestLabel = "";
-      let bestDist = Infinity;
-      for (const line of context.textLines) {
-        const lineCenter = line.y + line.height / 2;
-        const fieldCenter = ff.rect.y + ff.rect.height / 2;
-        const dx = Math.abs(line.x - ff.rect.x);
-        const dy = Math.abs(lineCenter - fieldCenter);
-        const dist = Math.sqrt(dx * dx + dy * dy);
+/**
+ * Find geometry candidates that overlap with or are near a Gemini bounding box.
+ * For text fields: find underlines/widgets within the box region.
+ * Returns the best-matching geometry with precise coordinates.
+ */
+function findGeometryInRegion(
+  geminiBox: { x: number; y: number; width: number; height: number },
+  context: DetectionContext,
+  usedGeoIds: Set<string>
+): { x: number; y: number; width: number; height: number } | null {
+  const tolerance = 25;
+  const regionLeft = geminiBox.x - tolerance;
+  const regionRight = geminiBox.x + geminiBox.width + tolerance;
+  const regionTop = geminiBox.y - tolerance;
+  const regionBottom = geminiBox.y + geminiBox.height + tolerance;
 
-        if (dist < bestDist && dist < 50) {
-          bestDist = dist;
-          bestLabel = line.items.map((i: PositionedTextItem) => i.text).join("").trim();
-        }
+  type ScoredGeo = { geo: GeometryCandidate; score: number };
+  const candidates: ScoredGeo[] = [];
+
+  for (const geo of context.geometryCandidates) {
+    if (usedGeoIds.has(geo.id)) continue;
+    if (geo.kind === "box") continue;
+    if (geo.width < 25) continue;
+
+    const geoRight = geo.x + geo.width;
+
+    // Check if geometry overlaps with the expanded Gemini region
+    const overlapX = Math.max(0, Math.min(geoRight, regionRight) - Math.max(geo.x, regionLeft));
+    const overlapY = geo.y >= regionTop && geo.y <= regionBottom;
+
+    if (overlapX <= 0 || !overlapY) continue;
+
+    let score = 100;
+    // Prefer geometry with more horizontal overlap with Gemini box
+    score += (overlapX / Math.max(geo.width, 1)) * 40;
+    // Prefer geometry close in y to the Gemini box center
+    const yDist = Math.abs((geo.y + geo.height / 2) - (geminiBox.y + geminiBox.height / 2));
+    score -= yDist * 2;
+    // Prefer wider geometry (more likely to be a real fill area)
+    if (geo.width >= 50) score += 15;
+    if (geo.width >= 100) score += 10;
+
+    candidates.push({ geo, score });
+  }
+
+  candidates.sort((a, b) => b.score - a.score);
+
+  if (candidates.length > 0 && candidates[0].score > 60) {
+    const bestGeo = candidates[0].geo;
+    usedGeoIds.add(bestGeo.id);
+
+    const baselinePad = bestGeo.kind === "underline" ? 12 : 4;
+    const correctedY = Math.max(0, bestGeo.y - baselinePad);
+    const geoBottom = bestGeo.y + bestGeo.height;
+    const fieldHeight = Math.max(geoBottom - correctedY, 16);
+
+    return {
+      x: bestGeo.x,
+      y: correctedY,
+      width: bestGeo.width,
+      height: fieldHeight,
+    };
+  }
+
+  return null;
+}
+
+function geminiToAiField(gf: GeminiField): AiIdentifiedField {
+  return {
+    canonicalFieldId: gf.canonicalFieldId,
+    label: gf.label,
+    nearbyText: gf.label,
+    fieldType: gf.fieldType,
+    fieldKind: gf.fieldKind,
+    checkboxValue: gf.checkboxValue ?? null,
+    groupId: gf.groupId ?? null,
+  };
+}
+
+export async function _detectFieldsWithGemini(
+  pdfBytes: Uint8Array,
+  pageNumber: number,
+  onStatus?: (status: string) => void
+): Promise<TemplateField[]> {
+  console.log("[Wrapkit Gemini] Starting Gemini + geometry hybrid detection...");
+  onStatus?.("Rendering PDF…");
+
+  const [base64, context] = await Promise.all([
+    renderPageToBase64(pdfBytes, pageNumber, 300),
+    buildDetectionContext(pdfBytes, pageNumber),
+  ]);
+
+  const pw = context.pageWidth;
+  const ph = context.pageHeight;
+  console.log(`[Wrapkit Gemini] Page: ${pw}x${ph}, ${context.textLines.length} lines, ${context.geometryCandidates.length} geometry`);
+  onStatus?.("Identifying fields with Gemini…");
+
+  const response = await callGeminiEdgeFunction(base64, "");
+  const geminiFields = response.fields ?? [];
+  console.log(`[Wrapkit Gemini] Gemini returned ${geminiFields.length} field(s)`);
+  if (response.pageDescription) {
+    console.log(`[Wrapkit Gemini] Form type: ${response.pageDescription}`);
+  }
+
+  if (geminiFields.length === 0) return [];
+
+  onStatus?.("Aligning to PDF structure…");
+
+  const seenCanonicalIds = new Set<string>();
+  const usedGeoIds = new Set<string>();
+  const templateFields: TemplateField[] = [];
+  let snappedCount = 0;
+  let rawCount = 0;
+
+  // For checkboxes, use the proven label-matching approach (which works well)
+  const checkboxGeminiFields = geminiFields.filter((gf) => gf.fieldType === "checkbox");
+  const textGeminiFields = geminiFields.filter((gf) => gf.fieldType !== "checkbox");
+
+  // Position card-type checkboxes as a batch
+  const cardCheckboxAiFields = checkboxGeminiFields
+    .filter((gf) => gf.canonicalFieldId && CREDIT_CARD_CHECKBOX_IDS.has(gf.canonicalFieldId))
+    .map(geminiToAiField);
+  const cardPositions = positionCardTypeCheckboxes(cardCheckboxAiFields, context, usedGeoIds);
+
+  // Process all checkboxes using label-matching (proven accurate)
+  for (let i = 0; i < checkboxGeminiFields.length; i++) {
+    const gf = checkboxGeminiFields[i];
+    const aiField = geminiToAiField(gf);
+
+    if (gf.canonicalFieldId) {
+      if (seenCanonicalIds.has(gf.canonicalFieldId)) continue;
+      seenCanonicalIds.add(gf.canonicalFieldId);
+    }
+
+    let coords: { x: number; y: number; width: number; height: number } | null = null;
+    if (gf.canonicalFieldId && cardPositions.has(gf.canonicalFieldId)) {
+      coords = cardPositions.get(gf.canonicalFieldId)!;
+    } else {
+      coords = findCheckboxGeometry(aiField, context, usedGeoIds);
+    }
+    if (!coords) continue;
+
+    templateFields.push(buildTemplateField(aiField, coords, templateFields.length, pageNumber));
+  }
+
+  // Process text fields using Gemini boxes + geometry snapping
+  for (let i = 0; i < textGeminiFields.length; i++) {
+    const gf = textGeminiFields[i];
+
+    if (gf.canonicalFieldId) {
+      if (seenCanonicalIds.has(gf.canonicalFieldId)) {
+        console.log(`[Wrapkit Gemini] Skipping duplicate: ${gf.canonicalFieldId}`);
+        continue;
       }
+      seenCanonicalIds.add(gf.canonicalFieldId);
+    }
 
-      const { fieldType, fieldKind } = apryseFieldTypeToWrapkit(ff.type);
-      const canonicalId = bestLabel ? matchCanonicalId(bestLabel) : null;
-      const canonicalDef = canonicalId
-        ? CANONICAL_FIELD_DEFINITIONS.find((d) => d.id === canonicalId)
-        : undefined;
+    // Convert Gemini normalized box to PDF coordinates
+    const [yMin, xMin, yMax, xMax] = gf.box_2d;
+    const geminiBox = {
+      x: (xMin / 1000) * pw,
+      y: (yMin / 1000) * ph,
+      width: Math.max(((xMax - xMin) / 1000) * pw, 10),
+      height: Math.max(((yMax - yMin) / 1000) * ph, 10),
+    };
 
-      const aiField: AiIdentifiedField = {
-        canonicalFieldId: canonicalId,
-        label: canonicalDef?.label || bestLabel || `Field ${templateFields.length + 1}`,
-        nearbyText: bestLabel,
-        fieldType,
-        fieldKind: canonicalDef?.fieldKind ?? fieldKind,
-        checkboxValue: null,
-        groupId: null,
+    // Try to snap to PDF geometry within the Gemini box region
+    const snappedCoords = findGeometryInRegion(geminiBox, context, usedGeoIds);
+
+    let finalCoords: { x: number; y: number; width: number; height: number };
+    if (snappedCoords) {
+      finalCoords = snappedCoords;
+      snappedCount++;
+    } else {
+      // Use Gemini box directly with height padding
+      finalCoords = {
+        x: geminiBox.x,
+        y: Math.max(0, geminiBox.y - 2),
+        width: geminiBox.width,
+        height: Math.max(geminiBox.height + 4, 16),
       };
-
-      usedRects.add(key);
-      templateFields.push(buildTemplateField(aiField, ff.rect, templateFields.length, pageNumber));
+      rawCount++;
     }
+
+    // Clamp to page bounds
+    finalCoords.x = Math.max(0, finalCoords.x);
+    finalCoords.y = Math.max(0, finalCoords.y);
+    if (finalCoords.x + finalCoords.width > pw) {
+      finalCoords.width = pw - finalCoords.x;
+    }
+
+    const aiField = geminiToAiField(gf);
+    const field = buildTemplateField(aiField, finalCoords, templateFields.length, pageNumber);
+    console.log(
+      `[Wrapkit Gemini] "${field.label}" → (${Math.round(finalCoords.x)}, ${Math.round(finalCoords.y)}) ${Math.round(finalCoords.width)}x${Math.round(finalCoords.height)} [${snappedCoords ? "snapped" : "raw"}]`
+    );
+    templateFields.push(field);
   }
 
-  // Supplemental: detect missing signatures using PDF.js geometry
-  // Fast (no AI call) — finds underlines above "SIGNATURE" text labels
-  try {
-    const context = await buildDetectionContext(pdfBytes, pageNumber);
-    const usedGeoIds = new Set<string>();
-    let geoSupplementCount = 0;
+  console.log(`[Wrapkit Gemini] Produced ${templateFields.length} fields (${snappedCount} snapped, ${rawCount} raw)`);
 
-    // Find signature fields: look for "SIGNATURE" text labels and underlines ABOVE them
-    for (const line of context.textLines) {
-      const lineText = line.items.map((i: PositionedTextItem) => i.text).join("").trim().toUpperCase();
-      if (!lineText.includes("SIGNATURE")) continue;
-
-      // On production forms, the signature underline is ABOVE the "SIGNATURE" label.
-      // Search geometry for underlines/lines in a band 5–30px above this label,
-      // horizontally overlapping with the label position.
-      const labelX = line.x;
-      const labelY = line.y;
-      let bestGeo: typeof context.geometryCandidates[0] | null = null;
-      let bestDist = Infinity;
-
-      for (const geo of context.geometryCandidates) {
-        if (usedGeoIds.has(geo.id)) continue;
-        if (geo.width < 60) continue; // signature lines are long
-        if (geo.height > 5) continue; // underlines are thin
-
-        const geoBottom = geo.y + geo.height;
-        const gap = labelY - geoBottom;
-
-        // Must be above the label, within 30px
-        if (gap < 0 || gap > 30) continue;
-
-        // Must horizontally overlap with the label area
-        const overlapLeft = Math.max(labelX, geo.x);
-        const overlapRight = Math.min(labelX + 150, geo.x + geo.width);
-        if (overlapRight - overlapLeft < 30) continue;
-
-        if (gap < bestDist) {
-          bestDist = gap;
-          bestGeo = geo;
-        }
-      }
-
-      if (bestGeo) {
-        usedGeoIds.add(bestGeo.id);
-        const coords = {
-          x: bestGeo.x,
-          y: Math.max(0, bestGeo.y - 12),
-          width: bestGeo.width,
-          height: Math.max(14, labelY - bestGeo.y + 2),
-        };
-
-        const sigField: AiIdentifiedField = {
-          canonicalFieldId: "cardholderSignature",
-          label: "Signature",
-          nearbyText: lineText,
-          fieldType: "text",
-          fieldKind: "signature",
-          checkboxValue: null,
-          groupId: null,
-        };
-
-        templateFields.push(buildTemplateField(sigField, coords, templateFields.length, pageNumber));
-        geoSupplementCount++;
-        console.log(`[Wrapkit Apryse] Geometry supplemental: added Signature at y=${Math.round(coords.y)}`);
-      }
-    }
-
-    if (geoSupplementCount > 0) {
-      console.log(`[Wrapkit Apryse] Geometry supplemental added ${geoSupplementCount} field(s)`);
-    }
-  } catch (err) {
-    console.warn("[Wrapkit Apryse] Geometry supplemental failed (non-critical):", err);
+  // Sweep for unclaimed checkboxes
+  const supplemental = detectUnclaimedCheckboxes(context, usedGeoIds, pageNumber, templateFields.length);
+  if (supplemental.length > 0) {
+    console.log(`[Wrapkit Gemini] Found ${supplemental.length} additional checkbox(es)`);
+    templateFields.push(...supplemental);
   }
 
-  console.log(`[Wrapkit Apryse] Produced ${templateFields.length} total template fields`);
   return dedupeFields(templateFields);
 }
 
@@ -1552,25 +1508,7 @@ export async function detectFieldsWithAI(
   pageNumber: number = 1,
   onStatus?: (status: string) => void
 ): Promise<TemplateField[]> {
-  // Tier 1: Apryse Data Extraction (AcroForm + AI form detection)
-  // Most accurate: native PDF form widgets + ML-based geometry detection
-  try {
-    getApryseServerUrl(); // throws if not configured
-    const apryseFields = await detectFieldsWithApryse(pdfBytes, pageNumber, onStatus);
-    if (apryseFields.length > 0) {
-      console.log(`[Wrapkit AI] Apryse succeeded with ${apryseFields.length} fields`);
-      return apryseFields;
-    }
-    console.log("[Wrapkit AI] Apryse returned 0 fields, falling back…");
-  } catch (err) {
-    if (err instanceof Error && err.message.includes("not configured")) {
-      console.log("[Wrapkit AI] Apryse server not configured, skipping…");
-    } else {
-      console.warn("[Wrapkit AI] Apryse detection failed, falling back:", err);
-    }
-  }
-
-  // Tier 2: Visual Geometry Matching (GPT-4o Vision + numbered PDF.js markers)
+  // Tier 1: Visual Geometry Matching (GPT-4o Vision + numbered PDF.js markers)
   try {
     const visualFields = await detectFieldsWithVisualMatching(pdfBytes, pageNumber, onStatus);
     if (visualFields.length > 0) {
@@ -1582,7 +1520,7 @@ export async function detectFieldsWithAI(
     console.warn("[Wrapkit AI] Visual matching failed, falling back:", err);
   }
 
-  // Tier 3: Azure Document Intelligence (prebuilt-document model)
+  // Tier 2: Azure Document Intelligence + Gemini
   try {
     const azureFields = await detectFieldsWithAzure(pdfBytes, pageNumber, onStatus);
     if (azureFields.length > 0) {
@@ -1594,8 +1532,8 @@ export async function detectFieldsWithAI(
     console.warn("[Wrapkit AI] Azure detection failed, falling back:", err);
   }
 
-  // Tier 4: GPT-4o + PDF.js hybrid (final fallback)
-  console.log("[Wrapkit AI] Starting hybrid AI+PDF.js detection (GPT-4o fallback)...");
+  // Tier 3: GPT-4o + PDF.js hybrid (final fallback)
+  console.log("[Wrapkit AI] Starting GPT-4o + PDF.js hybrid detection...");
   onStatus?.("Rendering PDF…");
 
   const [base64, context] = await Promise.all([

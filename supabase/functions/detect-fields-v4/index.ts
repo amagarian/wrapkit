@@ -350,7 +350,7 @@ Deno.serve(async (req: Request) => {
     console.log("[detect-fields-v4] Stage 1: Starting Azure Document Intelligence analysis...");
 
     const endpoint = AZURE_DOCAI_ENDPOINT.replace(/\/$/, "");
-    const analyzeUrl = `${endpoint}/documentintelligence/documentModels/prebuilt-document:analyze?api-version=2024-11-30`;
+    const analyzeUrl = `${endpoint}/formrecognizer/documentModels/prebuilt-document:analyze?api-version=2023-07-31`;
 
     const startResp = await fetch(analyzeUrl, {
       method: "POST",

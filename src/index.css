@@ -41,11 +41,20 @@ body {
 button {
   font-family: inherit;
   cursor: pointer;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
 }
 
 input, select, textarea {
   font-family: inherit;
   font-size: inherit;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+a {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
 }
 
 @keyframes processingSpinner {

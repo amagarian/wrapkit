@@ -2,6 +2,19 @@
   display: flex;
   height: 100%;
   min-height: 0;
+  position: relative;
+}
+
+.dragRegion {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 38px;
+  -webkit-app-region: drag;
+  app-region: drag;
+  z-index: 10;
+  pointer-events: auto;
 }
 
 .main {

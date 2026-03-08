@@ -19,6 +19,7 @@ export function AppShell({
 }: AppShellProps) {
   return (
     <div className={styles.shell}>
+      <div className={styles.dragRegion} />
       <Sidebar
         projects={projects}
         selectedId={selectedProjectId}
