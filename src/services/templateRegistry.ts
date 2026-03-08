@@ -176,22 +176,26 @@ function buildTemplateMatch(entry: TemplateCacheEntry, confidence: number): Temp
 async function fetchRemoteVerifiedEntries(): Promise<TemplateCacheEntry[]> {
   const supabase = getSupabaseClient();
   if (!supabase) {
+    console.warn("[Wrapkit] Supabase client is null — cloud registry not available");
     return [];
   }
 
+  console.log("[Wrapkit] Fetching verified templates from cloud...");
   const { data, error } = await supabase
     .from("template_versions")
     .select(
-      "id,family_id,template_id,version,status,source_pdf_path,preview_image_path,fingerprint,template_payload,submitted_at,verified_at,created_at,updated_at"
+      "id,family_id,template_id,version,status,source_pdf_path,fingerprint,template_payload,submitted_at,verified_at,created_at,updated_at"
     )
     .in("status", ["verified", "community-submitted"]);
 
   if (error) {
-    console.warn("Failed to fetch verified templates from Supabase", error);
+    console.warn("[Wrapkit] Failed to fetch verified templates from Supabase", error);
     return [];
   }
 
-  return (data as RawTemplateVersionRow[]).map((row) => toCacheEntry(mapRemoteVersion(row), "verified-cloud"));
+  const entries = (data as RawTemplateVersionRow[]).map((row) => toCacheEntry(mapRemoteVersion(row), "verified-cloud"));
+  console.log(`[Wrapkit] Fetched ${entries.length} verified templates from cloud`);
+  return entries;
 }
 
 export async function hydrateTemplateRegistry(): Promise<TemplateRegistrySnapshot> {
@@ -215,23 +219,27 @@ function rankTemplateCandidates(
 ): Array<{ entry: TemplateCacheEntry; confidence: number }> {
   const fileNameTokens = new Set((fingerprint.fileNameHints ?? []).concat((fileName ?? "").toLowerCase()));
 
-  return entries
-    .map((entry) => {
-      const { total } = scoreFingerprintMatch(fingerprint, entry.fingerprint);
-      const nameBonus = entry.template.name
-        .toLowerCase()
-        .split(/[^a-z0-9]+/)
-        .filter(Boolean)
-        .some((token) => fileNameTokens.has(token))
-        ? 0.06
-        : 0;
+  const scored = entries.map((entry) => {
+    const { total, detail } = scoreFingerprintMatch(fingerprint, entry.fingerprint);
+    const nameBonus = entry.template.name
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter(Boolean)
+      .some((token) => fileNameTokens.has(token))
+      ? 0.06
+      : 0;
 
-      return {
-        entry,
-        confidence: Math.min(1, total + nameBonus),
-      };
-    })
-    .filter(({ confidence }) => confidence >= 0.28)
+    const confidence = Math.min(1, total + nameBonus);
+    console.log(
+      `[Wrapkit] Match candidate "${entry.template.name}" (${entry.source}): ` +
+      `confidence=${confidence.toFixed(3)} [page=${detail.page.toFixed(2)} anchors=${detail.anchors.toFixed(2)} ` +
+      `fileName=${detail.fileName.toFixed(2)} checkbox=${detail.checkbox.toFixed(2)} nameBonus=${nameBonus}]`
+    );
+    return { entry, confidence };
+  });
+
+  return scored
+    .filter(({ confidence }) => confidence >= 0.90)
     .sort((left, right) => right.confidence - left.confidence)
     .slice(0, 3);
 }
@@ -245,7 +253,7 @@ export async function matchVerifiedTemplates(
   const ranked = rankTemplateCandidates(fingerprint, snapshot.cacheEntries, fileName);
   const templatesById = buildTemplateMap(snapshot.cacheEntries);
 
-  if (ranked[0] && ranked[0].confidence >= 0.78) {
+  if (ranked[0] && ranked[0].confidence >= 0.90) {
     return {
       fingerprint,
       templatesById,
@@ -265,7 +273,7 @@ export async function matchVerifiedTemplates(
   }
 
   const possibleMatches = ranked
-    .filter(({ confidence }) => confidence >= 0.4)
+    .filter(({ confidence }) => confidence >= 0.90)
     .map(({ entry, confidence }) => buildTemplateMatch(entry, confidence));
 
   if (possibleMatches.length > 0) {
@@ -344,6 +352,37 @@ async function uploadSubmission(submission: TemplateSubmission, pdfBytes?: Uint8
   return true;
 }
 
+async function getOrCreateAutoFamily(): Promise<string | null> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return null;
+
+  const SLUG = "community-auto";
+  const { data: existing } = await supabase
+    .from("template_families")
+    .select("id")
+    .eq("slug", SLUG)
+    .single();
+
+  if (existing?.id) return existing.id as string;
+
+  const { data: created, error } = await supabase
+    .from("template_families")
+    .insert({
+      slug: SLUG,
+      vendor_name: "Community",
+      form_name: "Auto-verified",
+      document_type: "generic",
+    })
+    .select("id")
+    .single();
+
+  if (error || !created?.id) {
+    console.warn("Failed to create default template family", error);
+    return null;
+  }
+  return created.id as string;
+}
+
 export async function submitTemplateForVerification({
   template,
   pdfBytes,
@@ -372,6 +411,80 @@ export async function submitTemplateForVerification({
   };
 
   const uploaded = await uploadSubmission(submission, pdfBytes);
+
+  if (uploaded) {
+    const familyId = await getOrCreateAutoFamily();
+    if (familyId) {
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        // Check for an existing version with the same fingerprint hash to overwrite
+        let remoteVersionId = template.remoteVersionId;
+        if (!remoteVersionId && fingerprint.fingerprintHash) {
+          const { data: existing } = await supabase
+            .from("template_versions")
+            .select("id")
+            .eq("fingerprint->>fingerprintHash", fingerprint.fingerprintHash)
+            .limit(1);
+          if (existing && existing.length > 0) {
+            remoteVersionId = existing[0].id;
+          }
+        }
+        remoteVersionId = remoteVersionId ?? `verified-${submission.id}`;
+        const version = template.version ?? "1.0";
+
+        const { error: versionError } = await supabase.from("template_versions").upsert({
+          id: remoteVersionId,
+          family_id: familyId,
+          template_id: template.id,
+          version,
+          status: "verified",
+          fingerprint,
+          template_payload: {
+            ...template,
+            status: "verified",
+            familyId,
+            remoteVersionId,
+            source: "verified-cloud",
+            fingerprint,
+          },
+          source_pdf_path: submission.sourcePdfPath,
+          verified_at: now,
+          submitted_at: now,
+        });
+
+        if (!versionError) {
+          await supabase.from("template_submissions").update({
+            status: "approved",
+          }).eq("id", submission.id);
+
+          updateTemplateSubmission(submission.id, { status: "approved" });
+
+          upsertTemplateCacheEntries([{
+            cacheKey: `${remoteVersionId}:${version}`,
+            familyId,
+            versionId: remoteVersionId,
+            source: "verified-cloud",
+            fingerprint,
+            template: {
+              ...template,
+              status: "verified",
+              familyId,
+              remoteVersionId,
+              version,
+              source: "verified-cloud",
+              fingerprint,
+              updatedAt: now,
+            },
+            cachedAt: now,
+            expiresAt: new Date(Date.now() + DEFAULT_CACHE_TTL_MS).toISOString(),
+          }]);
+        } else {
+          console.warn("Auto-verify: failed to upsert template_versions", versionError);
+        }
+      }
+    }
+  }
+
   const finalSubmission: TemplateSubmission = {
     ...submission,
     status: uploaded ? "submitted" : "queued",
@@ -402,7 +515,20 @@ export async function approveTemplateSubmission({
 
   const fingerprint = template.fingerprint ?? buildTemplateFingerprintFromTemplate(template, template.name);
   const now = new Date().toISOString();
-  const remoteVersionId = template.remoteVersionId ?? `approved-${submissionId}`;
+
+  // Check for an existing version with the same fingerprint hash to overwrite
+  let remoteVersionId = template.remoteVersionId;
+  if (!remoteVersionId && fingerprint.fingerprintHash) {
+    const { data: existing } = await supabase
+      .from("template_versions")
+      .select("id")
+      .eq("fingerprint->>fingerprintHash", fingerprint.fingerprintHash)
+      .limit(1);
+    if (existing && existing.length > 0) {
+      remoteVersionId = existing[0].id;
+    }
+  }
+  remoteVersionId = remoteVersionId ?? `approved-${submissionId}`;
 
   const { error: versionError } = await supabase.from("template_versions").upsert({
     id: remoteVersionId,

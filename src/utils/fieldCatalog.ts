@@ -43,7 +43,7 @@ export const CANONICAL_FIELD_DEFINITIONS: CanonicalFieldDefinition[] = [
     label: "PO No.",
     mappedProjectKey: "poNumber",
     fieldKind: "text",
-    aliases: ["po no", "po number", "po #", "purchase order"],
+    aliases: ["po no", "po number", "po #", "purchase order", "order #", "order no", "order number", "order#"],
     sectionHints: ["job", "billing"],
   },
   {
@@ -87,11 +87,27 @@ export const CANONICAL_FIELD_DEFINITIONS: CanonicalFieldDefinition[] = [
     multiline: true,
   },
   {
+    id: "billingCity",
+    label: "City",
+    mappedProjectKey: "billingCity",
+    fieldKind: "text",
+    aliases: ["city", "billing city"],
+    sectionHints: ["billing", "payment", "contact"],
+  },
+  {
+    id: "billingState",
+    label: "State",
+    mappedProjectKey: "billingState",
+    fieldKind: "text",
+    aliases: ["state", "billing state", "st"],
+    sectionHints: ["billing", "payment", "contact"],
+  },
+  {
     id: "billingZipCode",
-    label: "Billing Zip",
+    label: "Zip Code",
     mappedProjectKey: "billingZipCode",
     fieldKind: "text",
-    aliases: ["billing zip", "zip", "zip code", "postal code", "billing postal code"],
+    aliases: ["zip", "zip code", "postal code", "billing zip", "billing postal code"],
     sectionHints: ["billing", "payment", "contact"],
   },
   {

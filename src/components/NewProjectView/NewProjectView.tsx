@@ -5,6 +5,7 @@ import styles from "./NewProjectView.module.css";
 
 interface NewProjectViewProps {
   initialProject: Partial<Project>;
+  isEditing?: boolean;
   onChange: (updates: Partial<Project>) => void;
   onSave: () => void;
   onCancel: () => void;
@@ -13,6 +14,7 @@ interface NewProjectViewProps {
 
 export function NewProjectView({
   initialProject,
+  isEditing,
   onChange,
   onSave,
   onCancel,
@@ -96,7 +98,7 @@ export function NewProjectView({
           Cancel
         </button>
         <button type="button" className={styles.saveBtn} onClick={onSave}>
-          Create project
+          {isEditing ? "Save" : "Create project"}
         </button>
       </div>
     </div>

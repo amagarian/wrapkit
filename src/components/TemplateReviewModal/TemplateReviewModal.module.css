@@ -146,8 +146,9 @@
 }
 
 .fieldItemSelected {
-  border-color: var(--border-focus);
+  border-color: var(--text);
   background: var(--bg-input);
+  box-shadow: 0 0 0 1px var(--text);
 }
 
 .fieldItemRow {

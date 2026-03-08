@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import type { Template, TemplateField, Project, TemplateMappedProjectKey } from "@/types";
 import { PdfPageCanvas } from "@/components/PdfPageCanvas/PdfPageCanvas";
 import { DraggableField } from "@/components/DraggableField/DraggableField";
@@ -8,8 +8,12 @@ import styles from "./TemplateReviewModal.module.css";
 const PROJECT_KEY_LABELS: Record<string, string> = {
   jobName: "Job name",
   jobNumber: "Job number",
+  poNumber: "PO / Order number",
   productionCompany: "Production company",
   billingAddress: "Billing address",
+  billingCity: "City",
+  billingState: "State",
+  billingZipCode: "Zip code",
   creditCardHolder: "Name",
   email: "Email",
   phone: "Phone",
@@ -17,7 +21,6 @@ const PROJECT_KEY_LABELS: Record<string, string> = {
   creditCardNumber: "Card number",
   expDate: "Exp date",
   ccv: "CCV",
-  billingZipCode: "Billing zip code",
   cardholderSignature: "Signature",
   authorizationDate: "Authorization date",
 };
@@ -45,7 +48,6 @@ interface TemplateReviewModalProps {
   project?: Project | null;
   pdfBytes?: Uint8Array | null;
   onClose: () => void;
-  onSave: (template: Template) => void;
   onConfirm: (template: Template) => void;
   onSubmitForVerification: (template: Template) => void;
   onUndo: () => void;
@@ -58,6 +60,7 @@ interface TemplateReviewModalProps {
   onAddField: () => void;
   onAddCheckbox: () => void;
   onProjectChange?: (updates: Partial<Project>) => void;
+  onRedetect?: () => void;
 }
 
 export function TemplateReviewModal({
@@ -65,7 +68,6 @@ export function TemplateReviewModal({
   project,
   pdfBytes,
   onClose,
-  onSave,
   onConfirm,
   onSubmitForVerification,
   onUndo,
@@ -78,9 +80,11 @@ export function TemplateReviewModal({
   onAddField,
   onAddCheckbox,
   onProjectChange,
+  onRedetect,
 }: TemplateReviewModalProps) {
   const [pageDims, setPageDims] = useState<{ width: number; height: number; scale: number } | null>(null);
   const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
+  const fieldListRef = useRef<HTMLUListElement>(null);
 
   const handleDimensions = useCallback((dims: { width: number; height: number; scale: number }) => {
     setPageDims(dims);
@@ -120,7 +124,13 @@ export function TemplateReviewModal({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [canRedo, canUndo, onRedo, onUndo]);
 
-  const saveLabel = template.status === "verified" ? "Save local override" : "Save template locally";
+  useEffect(() => {
+    if (!selectedFieldId || !fieldListRef.current) return;
+    const el = fieldListRef.current.querySelector(`[data-field-id="${selectedFieldId}"]`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [selectedFieldId]);
 
   return (
     <div className={styles.overlay} role="dialog" aria-modal="true" aria-labelledby="template-modal-title">
@@ -142,7 +152,11 @@ export function TemplateReviewModal({
         </header>
 
         <div className={styles.body}>
-          <div className={styles.previewArea} onClick={() => setSelectedFieldId(null)}>
+          <div className={styles.previewArea} onClickCapture={(e) => {
+            const target = e.target as HTMLElement;
+            if (target.closest("[data-draggable-field]")) return;
+            setSelectedFieldId(null);
+          }}>
             {pdfBytes ? (
               <div className={styles.pdfContainer}>
                 <PdfPageCanvas
@@ -183,10 +197,11 @@ export function TemplateReviewModal({
 
           <aside className={styles.sidebar}>
             <h3 className={styles.sidebarTitle}>Fields ({template.fields.length})</h3>
-            <ul className={styles.fieldList}>
+            <ul className={styles.fieldList} ref={fieldListRef}>
               {template.fields.map((f) => (
                 <li
                   key={f.id}
+                  data-field-id={f.id}
                   className={`${styles.fieldItem} ${f.id === selectedFieldId ? styles.fieldItemSelected : ""}`}
                   onClick={() => setSelectedFieldId(f.id)}
                 >
@@ -310,19 +325,22 @@ export function TemplateReviewModal({
           <button type="button" className={styles.cancelBtn} onClick={onClose}>
             Cancel
           </button>
-          <button
-            type="button"
-            className={styles.cancelBtn}
-            onClick={() => onSubmitForVerification(template)}
-          >
-            Submit for verification
-          </button>
+          {onRedetect && (
+            <button
+              type="button"
+              className={styles.cancelBtn}
+              onClick={onRedetect}
+              title="Run fresh AI detection on this document"
+            >
+              Re-detect fields
+            </button>
+          )}
           <button
             type="button"
             className={styles.saveBtn}
-            onClick={() => onSave(template)}
+            onClick={() => onSubmitForVerification(template)}
           >
-            {saveLabel}
+            Save template
           </button>
           <button
             type="button"

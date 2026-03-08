@@ -18,6 +18,7 @@ import {
 import { writeFilledPdfBytes } from "@/utils/pdfWriter";
 import { exportPdfBytes, type PdfExportMode } from "@/utils/exportPdf";
 import { detectFieldsFromPdf, createTemplateFromDetectedFields } from "@/utils/fieldDetector";
+import { detectFieldsWithAI } from "@/utils/aiFieldDetector";
 import { extractProjectFromPdf } from "@/utils/pdfProjectExtractor";
 import { scoreFingerprintMatch } from "@/utils/templateFingerprint";
 import {
@@ -142,6 +143,7 @@ export default function App() {
   const [projectDocuments, setProjectDocuments] = useState<Record<string, ProjectDocument[]>>({});
   const [activeDocumentId, setActiveDocumentId] = useState<string | null>(null);
   const [matchModal, setMatchModal] = useState<PdfMatchResult | null>(null);
+  const [processingStatus, setProcessingStatus] = useState<string | null>(null);
 
   const selectedProject = selectedProjectId
     ? projects.find((p) => p.id === selectedProjectId) ?? null
@@ -371,11 +373,32 @@ export default function App() {
       }
 
       let detectedFields: Template["fields"] = [];
+      let detectionMethod: "ai" | "heuristic" | "none" = "none";
+
       try {
-        detectedFields = await detectFieldsFromPdf(bytes, 1);
+        console.log("[Wrapkit] Trying AI field detection...");
+        detectedFields = await detectFieldsWithAI(bytes, 1, setProcessingStatus);
+        if (detectedFields.length > 0) {
+          detectionMethod = "ai";
+          console.log(`[Wrapkit] AI detected ${detectedFields.length} field(s)`);
+        }
       } catch (err) {
-        console.warn("Field detection failed:", err);
+        console.warn("[Wrapkit] AI detection unavailable, falling back to heuristic:", err);
       }
+
+      if (detectedFields.length === 0) {
+        try {
+          setProcessingStatus("Detecting fields…");
+          detectedFields = await detectFieldsFromPdf(bytes, 1);
+          if (detectedFields.length > 0) {
+            detectionMethod = "heuristic";
+          }
+        } catch (err) {
+          console.warn("[Wrapkit] Heuristic detection also failed:", err);
+        }
+      }
+
+      setProcessingStatus(null);
 
       const draft: Template =
         detectedFields.length > 0
@@ -406,9 +429,10 @@ export default function App() {
       });
       autoFillDocument(draft, docId, selectedProjectId);
       if (!options.silentToasts) {
+        const methodLabel = detectionMethod === "ai" ? "AI" : "auto";
         showToast(
           detectedFields.length > 0
-            ? `Auto-filled with ${detectedFields.length} detected field(s). Use Edit Template to refine.`
+            ? `${methodLabel}-detected ${detectedFields.length} field(s). Use Edit Template to refine.`
             : "No recognizable labels found. Use Edit Template to add fields manually.",
           "info"
         );
@@ -732,23 +756,41 @@ export default function App() {
 
     const submittedTemplate: Template = {
       ...submissionBase,
-      status: "community-submitted",
-      source: "community-submitted",
+      status: result.queuedOffline ? "community-submitted" : "verified",
+      source: result.queuedOffline ? "community-submitted" : "verified-cloud",
       fingerprint: result.submission.fingerprint,
       updatedAt: result.submission.submittedAt,
     };
+    upsertLocalTemplate(submittedTemplate);
     setEditedTemplates((prev) => ({ ...prev, [template.id]: submittedTemplate }));
     setDraftTemplate(submittedTemplate);
     setTemplateUndoStack([]);
     setTemplateRedoStack([]);
     setTemplateModal(null);
+
+    if (activeDocumentId && selectedProjectId) {
+      updateDocumentInProject(selectedProjectId, activeDocumentId, {
+        matchResult: {
+          kind: "verified",
+          verifiedMatch: {
+            templateId: submittedTemplate.id,
+            templateName: submittedTemplate.name,
+            status: submittedTemplate.status,
+            confidence: 1,
+          },
+          syncState: "matched",
+        },
+        templateId: submittedTemplate.id,
+      });
+    }
+
     showToast(
       result.queuedOffline
-        ? "Template submission queued locally until the cloud registry is configured."
-        : "Template submitted for verification.",
+        ? "Template queued locally — will sync when cloud registry is configured."
+        : "Template verified and shared with community.",
       "success"
     );
-  }, [pdfSource?.bytes, pdfSource?.fileName, selectedProject?.id, showToast]);
+  }, [activeDocumentId, selectedProjectId, pdfSource?.bytes, pdfSource?.fileName, selectedProject?.id, showToast, updateDocumentInProject]);
 
   const exportFilledPdf = useCallback(
     async (
@@ -855,9 +897,19 @@ export default function App() {
         runFillAction(template, mode, project, sourceBytes, fileName, {}, options);
         return;
       }
+      const savedValues = promptValuesByTemplate[template.id];
+      const isCheckbox = (f: typeof promptFields[0]) =>
+        f.fieldType === "checkbox" || f.fieldKind === "boolean-checkbox";
+      const allFilled = savedValues && promptFields.every(
+        (f) => isCheckbox(f) || (savedValues[f.id] ?? "").trim()
+      );
+      if (allFilled) {
+        runFillAction(template, mode, project, sourceBytes, fileName, savedValues, options);
+        return;
+      }
       setFillPromptModal({ template, mode, sourceBytes, fileName });
     },
-    [runFillAction]
+    [runFillAction, promptValuesByTemplate]
   );
 
   const handlePreviewBeforeExport = useCallback(
@@ -959,6 +1011,7 @@ export default function App() {
         {view === "new-project" || view === "edit-project" ? (
           <NewProjectView
             initialProject={view === "edit-project" && selectedProject ? selectedProject : newProjectDraft}
+            isEditing={view === "edit-project"}
             onChange={(updates) => {
               if (view === "edit-project" && selectedProjectId) {
                 updateProject(selectedProjectId, updates);
@@ -992,6 +1045,7 @@ export default function App() {
           <ProjectWorkspace
             project={selectedProject}
             documents={currentDocuments}
+            processingStatus={processingStatus}
             onPdfDrop={handlePdfDrop}
             onEditProject={handleEditProject}
             onDeleteProject={() => {
@@ -1125,7 +1179,6 @@ export default function App() {
             setTemplateRedoStack([]);
             setTemplateModal(null);
           }}
-          onSave={handleSaveTemplate}
           onConfirm={(template) => {
             handleSaveTemplate(template);
             if (activeDocumentId && selectedProjectId) {
@@ -1151,6 +1204,50 @@ export default function App() {
           onAddField={handleAddField}
           onAddCheckbox={handleAddCheckbox}
           onProjectChange={selectedProjectId ? (updates) => updateProject(selectedProjectId, updates) : undefined}
+          onRedetect={pdfSource?.bytes ? async () => {
+            const bytes = pdfSource.bytes;
+            setTemplateModal(null);
+
+            let detectedFields: Template["fields"] = [];
+            try {
+              detectedFields = await detectFieldsWithAI(bytes, 1, setProcessingStatus);
+            } catch (err) {
+              console.warn("[Wrapkit] AI re-detection failed, falling back:", err);
+            }
+            if (detectedFields.length === 0) {
+              try {
+                setProcessingStatus("Detecting fields…");
+                detectedFields = await detectFieldsFromPdf(bytes, 1);
+              } catch (err) {
+                console.warn("[Wrapkit] Heuristic re-detection also failed:", err);
+              }
+            }
+            setProcessingStatus(null);
+
+            if (detectedFields.length === 0) {
+              showToast("No fields detected.", "info");
+              return;
+            }
+
+            const newTemplate: Template = {
+              ...createTemplateFromDetectedFields(detectedFields, pdfSource.fileName),
+              source: "local-draft",
+            } as Template;
+
+            setDraftTemplate(newTemplate);
+            setEditedTemplates((prev) => ({ ...prev, [newTemplate.id]: newTemplate }));
+            if (activeDocumentId && selectedProjectId) {
+              updateDocumentInProject(selectedProjectId, activeDocumentId, {
+                templateId: newTemplate.id,
+                status: "matched",
+              });
+              autoFillDocument(newTemplate, activeDocumentId, selectedProjectId);
+            }
+            setTemplateUndoStack([]);
+            setTemplateRedoStack([]);
+            setTemplateModal({ template: newTemplate });
+            showToast(`Re-detected ${detectedFields.length} field(s).`, "success");
+          } : undefined}
         />
       )}
 
@@ -1178,16 +1275,12 @@ export default function App() {
       {fillPromptModal && selectedProject && (
         <FillPromptModal
           template={fillPromptModal.template}
+          pdfBytes={fillPromptModal.sourceBytes}
           mode={fillPromptModal.mode}
           initialValues={promptValuesByTemplate[fillPromptModal.template.id] ?? {}}
           onClose={() => setFillPromptModal(null)}
           onSubmit={(values) => {
-            const promptFields = getPromptFields(fillPromptModal.template);
-            const firstMissing = promptFields.find((field) => !(values[field.id] ?? "").trim());
-            if (firstMissing) {
-              showToast(`Enter a value for ${getTemplateFieldPromptLabel(firstMissing)}.`, "error");
-              return;
-            }
+            
             setPromptValuesByTemplate((prev) => ({
               ...prev,
               [fillPromptModal.template.id]: values,
@@ -1199,6 +1292,7 @@ export default function App() {
       )}
 
       <Toast toast={toast} onDismiss={() => setToast(null)} />
+
     </>
   );
 }

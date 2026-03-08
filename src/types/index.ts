@@ -14,6 +14,8 @@ export type CanonicalFieldId =
   | "authorizationDate"
   | "productionCompany"
   | "billingAddress"
+  | "billingCity"
+  | "billingState"
   | "billingZipCode"
   | "producer"
   | "email"

@@ -12,6 +12,9 @@ const TEXT_FIELDS: { key: keyof Project; label: string }[] = [
   { key: "jobNumber", label: "JOB NUMBER" },
   { key: "productionCompany", label: "PRODUCTION COMPANY" },
   { key: "billingAddress", label: "BILLING ADDRESS" },
+  { key: "billingCity", label: "CITY" },
+  { key: "billingState", label: "STATE" },
+  { key: "billingZipCode", label: "ZIP CODE" },
   { key: "creditCardHolder", label: "NAME" },
   { key: "email", label: "EMAIL" },
   { key: "phone", label: "PHONE" },
@@ -21,7 +24,6 @@ const CARD_FIELDS: { key: keyof Project; label: string }[] = [
   { key: "creditCardNumber", label: "CARD NUMBER" },
   { key: "expDate", label: "EXP DATE" },
   { key: "ccv", label: "CCV" },
-  { key: "billingZipCode", label: "BILLING ZIP CODE" },
   { key: "cardholderSignature", label: "SIGNATURE" },
 ];
 

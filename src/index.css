@@ -47,3 +47,7 @@ input, select, textarea {
   font-family: inherit;
   font-size: inherit;
 }
+
+@keyframes processingSpinner {
+  to { transform: rotate(360deg); }
+}

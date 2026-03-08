@@ -3,11 +3,23 @@
   "description": "Default capability for the main window",
   "windows": ["main"],
   "permissions": [
+    "core:default",
     "dialog:default",
+    "shell:default",
+    "fs:default",
+    "fs:allow-read-file",
     "fs:allow-write-file",
+    "fs:allow-exists",
     {
       "identifier": "fs:scope",
-      "allow": ["$DOWNLOAD/**/*"]
+      "allow": [
+        "$HOME/**",
+        "$DESKTOP/**",
+        "$DOWNLOAD/**",
+        "$DOCUMENT/**",
+        "/Volumes/**",
+        "/tmp/**"
+      ]
     }
   ]
 }

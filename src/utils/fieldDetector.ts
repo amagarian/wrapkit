@@ -18,7 +18,7 @@ interface TextItem {
   height: number;
 }
 
-interface PositionedTextItem {
+export interface PositionedTextItem {
   text: string;
   x: number;
   y: number;
@@ -27,7 +27,7 @@ interface PositionedTextItem {
   pageNumber: number;
 }
 
-interface TextLine {
+export interface TextLine {
   id: string;
   text: string;
   normalized: string;
@@ -41,7 +41,7 @@ interface TextLine {
 
 type GeometryKind = "underline" | "box" | "widget";
 
-interface GeometryCandidate {
+export interface GeometryCandidate {
   id: string;
   kind: GeometryKind;
   x: number;
@@ -53,7 +53,7 @@ interface GeometryCandidate {
   consumed?: boolean;
 }
 
-interface DetectionContext {
+export interface DetectionContext {
   pageHeight: number;
   pageWidth: number;
   textItems: PositionedTextItem[];
@@ -225,7 +225,8 @@ function parseConstructPath(
     const left = width >= 0 ? x : x + width;
     const top = pageHeight - (height >= 0 ? y + height : y);
 
-    if (absWidth >= 8 && absWidth <= 20 && absHeight >= 8 && absHeight <= 20) {
+    // Checkbox-sized boxes (broadened range)
+    if (absWidth >= 5 && absWidth <= 28 && absHeight >= 5 && absHeight <= 28) {
       candidates.push({
         id: `${candidatePrefix}-box-${candidates.length + 1}`,
         kind: "box",
@@ -239,6 +240,7 @@ function parseConstructPath(
       return;
     }
 
+    // Thin horizontal lines (underlines)
     if (absWidth >= 28 && absWidth <= 520 && absHeight <= 3) {
       candidates.push({
         id: `${candidatePrefix}-rect-line-${candidates.length + 1}`,
@@ -247,6 +249,21 @@ function parseConstructPath(
         y: top,
         width: absWidth,
         height: Math.max(absHeight, 2),
+        pageNumber: 1,
+        source,
+      });
+      return;
+    }
+
+    // Form-field-sized filled rectangles (grey backgrounds, input areas)
+    if (absWidth >= 28 && absWidth <= 520 && absHeight >= 8 && absHeight <= 30) {
+      candidates.push({
+        id: `${candidatePrefix}-filled-rect-${candidates.length + 1}`,
+        kind: "underline",
+        x: left,
+        y: top,
+        width: absWidth,
+        height: absHeight,
         pageNumber: 1,
         source,
       });
@@ -291,7 +308,7 @@ function parseConstructPath(
   return candidates;
 }
 
-async function buildDetectionContext(
+export async function buildDetectionContext(
   pdfBytes: Uint8Array,
   pageNumber: number
 ): Promise<DetectionContext> {
@@ -350,7 +367,7 @@ async function buildDetectionContext(
     const height = Math.abs(y2 - y1);
     geometryCandidates.push({
       id: `acroform-${index + 1}`,
-      kind: width <= 20 && height <= 20 ? "box" : "widget",
+      kind: width <= 28 && height <= 28 ? "box" : "widget",
       x: Math.min(x1, x2),
       y: pageHeight - Math.max(y1, y2),
       width,
@@ -361,12 +378,63 @@ async function buildDetectionContext(
   });
 
   const operatorList = await page.getOperatorList();
+  const pdfOps = pdfjsLib.OPS as typeof OPS;
+
+  // Track fill color state to detect non-white filled rectangles
+  let fillColor: [number, number, number] = [1, 1, 1]; // default white
+  let lastConstructPathIdx = -1;
+
   operatorList.fnArray.forEach((fn, index) => {
-    if (fn !== pdfjsLib.OPS.constructPath) return;
-    const [ops, coords] = operatorList.argsArray[index] as [number[], number[], number[]?];
-    geometryCandidates.push(
-      ...parseConstructPath(ops, coords, pageHeight, `path-${index + 1}`, "geometry-line")
-    );
+    // Track fill color changes
+    if (fn === pdfOps.setFillRGBColor) {
+      const [r, g, b] = operatorList.argsArray[index] as [number, number, number];
+      fillColor = [r, g, b];
+      return;
+    }
+    if (fn === (pdfOps as Record<string, number>).setFillGrayColor) {
+      const [gray] = operatorList.argsArray[index] as [number];
+      fillColor = [gray, gray, gray];
+      return;
+    }
+
+    if (fn === pdfOps.constructPath) {
+      lastConstructPathIdx = index;
+      const [ops, coords] = operatorList.argsArray[index] as [number[], number[], number[]?];
+      geometryCandidates.push(
+        ...parseConstructPath(ops, coords, pageHeight, `path-${index + 1}`, "geometry-line")
+      );
+      return;
+    }
+
+    // When a fill operation occurs, check if the fill color is non-white
+    // to detect grey-background form fields and checkboxes
+    if (
+      (fn === pdfOps.fill || fn === pdfOps.eoFill || fn === pdfOps.fillStroke) &&
+      lastConstructPathIdx >= 0
+    ) {
+      const isNonWhite = fillColor[0] < 0.95 || fillColor[1] < 0.95 || fillColor[2] < 0.95;
+      const isNotBlack = fillColor[0] > 0.05 || fillColor[1] > 0.05 || fillColor[2] > 0.05;
+
+      if (isNonWhite && isNotBlack) {
+        const [ops, coords] = operatorList.argsArray[lastConstructPathIdx] as [number[], number[], number[]?];
+        const filledCandidates = parseConstructPath(
+          ops, coords, pageHeight,
+          `filled-${lastConstructPathIdx + 1}`,
+          "geometry-line"
+        );
+        // Add filled candidates that aren't already in the list
+        for (const fc of filledCandidates) {
+          const alreadyExists = geometryCandidates.some(
+            (g) => Math.abs(g.x - fc.x) < 3 && Math.abs(g.y - fc.y) < 3 &&
+                   Math.abs(g.width - fc.width) < 4 && Math.abs(g.height - fc.height) < 4
+          );
+          if (!alreadyExists) {
+            geometryCandidates.push(fc);
+          }
+        }
+      }
+      lastConstructPathIdx = -1;
+    }
   });
 
   const glyphBoxes = textItems

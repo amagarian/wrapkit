@@ -1,6 +1,6 @@
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import type { Project, Template, TemplateField } from "@/types";
-import { getTemplateFieldValue, type PromptFieldValues } from "@/utils/fill";
+import { getTemplateFieldValue, repairTemplateMappings, type PromptFieldValues } from "@/utils/fill";
 
 function isCheckboxField(field: TemplateField): boolean {
   return (
@@ -48,6 +48,21 @@ export async function writeFilledPdfBytes(
   options: WritePdfOptions = {}
 ): Promise<Uint8Array> {
   const pdfDoc = await PDFDocument.load(sourcePdfBytes);
+
+  // Flatten existing AcroForm fields so they don't cover our drawn text.
+  // Interactive widgets render on top of page content in PDF viewers,
+  // so we must remove them before writing.
+  try {
+    const form = pdfDoc.getForm();
+    const fields = form.getFields();
+    if (fields.length > 0) {
+      console.log(`[pdfWriter] Flattening ${fields.length} existing AcroForm fields`);
+      form.flatten();
+    }
+  } catch {
+    // No form or form access failed — safe to continue
+  }
+
   const pages = pdfDoc.getPages();
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const signatureFont = await pdfDoc.embedFont(StandardFonts.TimesRomanItalic);
@@ -55,19 +70,29 @@ export async function writeFilledPdfBytes(
   const defaultFontSize = options.defaultFontSize ?? 10;
   const promptValues = options.promptValues ?? {};
 
-  for (const field of template.fields) {
+  const repairedTemplate = repairTemplateMappings(template);
+  const siblingKeys = new Set(
+    repairedTemplate.fields.map((f) => f.mappedProjectKey).filter(Boolean)
+  );
+
+  for (const field of repairedTemplate.fields) {
     const pageIndex = Math.max(0, Math.min(pages.length - 1, field.pageNumber - 1));
     const page = pages[pageIndex];
 
     const pageHeight = page.getHeight();
-    const rawValue = getTemplateFieldValue(project, field, promptValues);
+    const rawValue = getTemplateFieldValue(project, field, promptValues, siblingKeys);
     if (!rawValue) continue;
 
     const x = field.x;
     const yPdfBottom = pageHeight - (field.y + field.height);
 
     if (isCheckboxField(field)) {
-      if (field.checkboxValue && rawValue === field.checkboxValue) {
+      const isCreditCardCheckbox = field.canonicalFieldId?.startsWith("creditCardType");
+      const shouldCheck = isCreditCardCheckbox
+        ? field.checkboxValue && rawValue === field.checkboxValue
+        : rawValue === "yes";
+
+      if (shouldCheck) {
         const s = Math.min(field.width, field.height) * 0.7;
         const cx = x + field.width / 2;
         const cy = yPdfBottom + field.height / 2;

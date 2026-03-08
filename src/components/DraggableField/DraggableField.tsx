@@ -176,6 +176,7 @@ export function DraggableField({
     return (
       <div
         ref={containerRef}
+        data-draggable-field
         className={`${styles.checkboxField} ${isChecked ? styles.checked : ""} ${selected ? styles.selected : ""} ${dragMode ? styles.dragging : ""}`}
         style={{
           left: field.x * scale,
@@ -214,6 +215,7 @@ export function DraggableField({
   return (
     <div
       ref={containerRef}
+      data-draggable-field
       className={`${styles.field} ${selected ? styles.selected : ""} ${dragMode ? styles.dragging : ""}`}
       style={scaledStyle}
       onMouseDown={handleFieldMouseDown}

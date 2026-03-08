@@ -35,12 +35,8 @@ export function MatchStatusModal({
           </button>
         </header>
 
-        {lookupMessage && (
-          <p className={styles.statusNote}>
-            {lookupMessage}
-            {matchSource ? ` Source: ${matchSource}.` : ""}
-            {syncState === "matching" ? " Matching..." : ""}
-          </p>
+        {syncState === "matching" && (
+          <p className={styles.statusNote}>Matching...</p>
         )}
 
         <div className={styles.body}>
@@ -89,9 +85,6 @@ export function MatchStatusModal({
           {kind === "none" && (
             <div className={styles.card}>
               <span className={`${styles.badge} ${styles.none}`}>No verified template</span>
-              <p className={styles.hint}>
-                A draft template with guessed fields was created. Open the editor to refine and save.
-              </p>
               {draftTemplateId && (
                 <button type="button" className={styles.primaryBtn} onClick={() => onOpenTemplateReview(draftTemplateId)}>
                   Open template editor
