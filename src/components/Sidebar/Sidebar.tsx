@@ -12,6 +12,7 @@ interface SidebarProps {
 export function Sidebar({ projects, selectedId, onSelect, onNewProject }: SidebarProps) {
   const [search, setSearch] = useState("");
   const [updateStatus, setUpdateStatus] = useState<"idle" | "checking" | "downloading" | "upToDate" | "error">("idle");
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
 
   const filtered = search.trim()
     ? projects.filter((p) => p.label.toLowerCase().includes(search.toLowerCase()))
@@ -19,6 +20,7 @@ export function Sidebar({ projects, selectedId, onSelect, onNewProject }: Sideba
 
   const checkForUpdates = useCallback(async () => {
     setUpdateStatus("checking");
+    setErrorDetail(null);
     try {
       const { check } = await import("@tauri-apps/plugin-updater");
       const update = await check();
@@ -31,10 +33,11 @@ export function Sidebar({ projects, selectedId, onSelect, onNewProject }: Sideba
         setUpdateStatus("upToDate");
         setTimeout(() => setUpdateStatus("idle"), 3000);
       }
-    } catch (err) {
-      console.error("[Updater] Check failed:", err);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setErrorDetail(msg);
       setUpdateStatus("error");
-      setTimeout(() => setUpdateStatus("idle"), 4000);
+      setTimeout(() => { setUpdateStatus("idle"); setErrorDetail(null); }, 8000);
     }
   }, []);
 
@@ -42,7 +45,7 @@ export function Sidebar({ projects, selectedId, onSelect, onNewProject }: Sideba
     updateStatus === "checking" ? "Checking…" :
     updateStatus === "downloading" ? "Downloading update…" :
     updateStatus === "upToDate" ? "Up to date" :
-    updateStatus === "error" ? "Update check failed" :
+    updateStatus === "error" ? (errorDetail ? `Error: ${errorDetail}` : "Update check failed") :
     "Check for updates";
 
   return (
