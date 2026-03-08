@@ -1,6 +1,6 @@
 {
   "productName": "Wrapkit",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "identifier": "com.wrapkit.app",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -29,7 +29,10 @@
   "bundle": {
     "active": true,
     "createUpdaterArtifacts": true,
-    "targets": ["dmg", "app"],
+    "targets": [
+      "dmg",
+      "app"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

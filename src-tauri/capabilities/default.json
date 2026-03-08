@@ -8,6 +8,7 @@
     "shell:default",
     "fs:default",
     "updater:default",
+    "process:allow-relaunch",
     "process:allow-restart",
     "fs:allow-read-file",
     "fs:allow-write-file",

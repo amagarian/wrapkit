@@ -31,7 +31,8 @@ export function Sidebar({ projects, selectedId, onSelect, onNewProject }: Sideba
         setUpdateStatus("upToDate");
         setTimeout(() => setUpdateStatus("idle"), 3000);
       }
-    } catch {
+    } catch (err) {
+      console.error("[Updater] Check failed:", err);
       setUpdateStatus("error");
       setTimeout(() => setUpdateStatus("idle"), 4000);
     }
