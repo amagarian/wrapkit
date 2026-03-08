@@ -19,7 +19,7 @@ export function AppShell({
 }: AppShellProps) {
   return (
     <div className={styles.shell}>
-      <div className={styles.dragRegion} />
+      <div className={styles.dragRegion} data-tauri-drag-region />
       <Sidebar
         projects={projects}
         selectedId={selectedProjectId}
