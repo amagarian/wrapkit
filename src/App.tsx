@@ -12,7 +12,6 @@ import { MatchStatusModal } from "@/components/MatchStatusModal/MatchStatusModal
 import { Toast, type ToastState } from "@/components/Toast/Toast";
 import {
   getPromptFields,
-  getTemplateFieldPromptLabel,
   type PromptFieldValues,
 } from "@/utils/fill";
 import { writeFilledPdfBytes } from "@/utils/pdfWriter";

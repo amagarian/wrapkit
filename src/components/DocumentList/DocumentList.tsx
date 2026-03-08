@@ -18,7 +18,6 @@ export function DocumentList({ documents, onOpen, onDownload, onEditTemplate, on
       <h3 className={styles.heading}>DOCUMENTS</h3>
       {documents.map((doc) => {
         const hasTemplate = Boolean(doc.templateId);
-        const isFilled = doc.status === "filled";
 
         return (
           <div key={doc.id} className={styles.row}>

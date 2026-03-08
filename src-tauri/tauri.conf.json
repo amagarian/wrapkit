@@ -1,6 +1,6 @@
 {
   "productName": "Wrapkit",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "com.wrapkit.app",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -28,6 +28,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": ["dmg", "app"],
     "icon": [
       "icons/32x32.png",
@@ -58,6 +59,12 @@
   "plugins": {
     "shell": {
       "open": true
+    },
+    "updater": {
+      "endpoints": [
+        "https://github.com/amagarian/wrapkit/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQyRDM5NzgyRjREQ0E1RjQKUldUMHBkejBncGZUMHF0YTlGMk02ZFZZK0RzelIrenczLzU0M2RpN1owclFNYW4rUkdWdkdaR0kK"
     }
   }
 }

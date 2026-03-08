@@ -369,7 +369,6 @@ function positionCardTypeCheckboxes(
 
     for (const box of rowBoxes) {
       if (assignedBoxIds.has(box.id)) continue;
-      const dist = Math.abs(box.x - textItem.x) + Math.abs(box.x - (textItem.x + textItem.width));
       // Prefer boxes immediately before or after the text label
       const xDist = Math.min(
         Math.abs(box.x - (textItem.x + textItem.width)),

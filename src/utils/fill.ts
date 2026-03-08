@@ -34,7 +34,7 @@ export function getPromptFields(template: Template): TemplateField[] {
 export function repairTemplateMappings(template: Template): Template {
   let changed = false;
   const repairedFields = template.fields.map((f) => {
-    if (f.mappedProjectKey && f.mappedProjectKey !== "") return f;
+    if (f.mappedProjectKey) return f;
 
     let def = f.canonicalFieldId
       ? CANONICAL_FIELD_DEFINITIONS.find((d) => d.id === f.canonicalFieldId)

@@ -22,7 +22,7 @@ export function MatchStatusModal({
   onCreateNewTemplate,
   onEditTemplate,
 }: MatchStatusModalProps) {
-  const { kind, verifiedMatch, possibleMatches, draftTemplateId, fileName, lookupMessage, matchSource, syncState } = result;
+  const { kind, verifiedMatch, possibleMatches, draftTemplateId, fileName, syncState } = result;
 
   return (
     <div className={styles.overlay} role="dialog" aria-modal="true">
