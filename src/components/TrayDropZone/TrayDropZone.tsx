@@ -39,18 +39,6 @@ export function TrayDropZone() {
     return () => { void u1.then((fn) => fn()); };
   }, [selectedProject]);
 
-  useEffect(() => {
-    const win = getCurrentWebviewWindow();
-    const unlisten = win.onFocusChanged(({ payload: focused }) => {
-      if (focused || status === "processing") return;
-      setTimeout(async () => {
-        const stillFocused = await win.isFocused();
-        if (!stillFocused) await win.hide();
-      }, 500);
-    });
-    return () => { void unlisten.then((fn) => fn()); };
-  }, [status]);
-
   const resetIdleTimer = useCallback(() => {
     if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
     idleTimerRef.current = setTimeout(async () => {
@@ -64,6 +52,14 @@ export function TrayDropZone() {
     const win = getCurrentWebviewWindow();
     await win.hide();
   }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") void hideWindow();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [hideWindow]);
 
   const handleDragOver = useCallback(
     (e: React.DragEvent) => {
