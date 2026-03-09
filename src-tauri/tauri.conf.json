@@ -1,6 +1,6 @@
 {
   "productName": "Wrapkit",
-  "version": "0.2.11",
+  "version": "0.2.12",
   "identifier": "com.wrapkit.app",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -26,16 +26,15 @@
       {
         "label": "dropzone",
         "title": "Drop PDF",
-        "width": 280,
-        "height": 200,
+        "width": 260,
+        "height": 210,
         "resizable": false,
         "fullscreen": false,
         "decorations": false,
+        "transparent": true,
         "alwaysOnTop": true,
         "visible": false,
-        "skipTaskbar": true,
-        "x": 800,
-        "y": 40
+        "skipTaskbar": true
       }
     ],
     "security": {

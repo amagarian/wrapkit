@@ -11,27 +11,49 @@ import styles from "./TrayDropZone.module.css";
 
 type DropStatus = "idle" | "processing" | "done" | "error";
 
-interface JobSelection {
-  projectId: string;
-  projectLabel: string;
+interface ProjectItem {
+  id: string;
+  label: string;
 }
 
 export function TrayDropZone() {
-  const [job, setJob] = useState<JobSelection | null>(null);
+  const [projects, setProjects] = useState<ProjectItem[]>([]);
+  const [selectedProject, setSelectedProject] = useState<ProjectItem | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const [status, setStatus] = useState<DropStatus>("idle");
   const [statusMessage, setStatusMessage] = useState("");
   const idleTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
-    const unlisten = listen<JobSelection>("tray-job-selected", (event) => {
-      setJob(event.payload);
-      setStatus("idle");
-      setStatusMessage("");
-      resetIdleTimer();
+    document.documentElement.style.background = "transparent";
+    document.body.style.background = "transparent";
+  }, []);
+
+  useEffect(() => {
+    const u1 = listen<ProjectItem[]>("tray-projects-sync", (event) => {
+      setProjects(event.payload);
+      if (!selectedProject && event.payload.length > 0) {
+        setSelectedProject(event.payload[0]);
+      }
+    });
+    return () => { void u1.then((fn) => fn()); };
+  }, [selectedProject]);
+
+  useEffect(() => {
+    const win = getCurrentWebviewWindow();
+    const handleBlur = () => {
+      if (status === "processing") return;
+      setTimeout(async () => {
+        const focused = await win.isFocused();
+        if (!focused) await win.hide();
+      }, 200);
+    };
+
+    const unlisten = win.onFocusChanged(({ payload: focused }) => {
+      if (!focused) handleBlur();
     });
     return () => { void unlisten.then((fn) => fn()); };
-  }, []);
+  }, [status]);
 
   const resetIdleTimer = useCallback(() => {
     if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
@@ -65,7 +87,7 @@ export function TrayDropZone() {
 
   const processPdf = useCallback(
     async (file: File) => {
-      if (!job) return;
+      if (!selectedProject) return;
       setStatus("processing");
       setStatusMessage(`Processing ${file.name}…`);
 
@@ -73,7 +95,7 @@ export function TrayDropZone() {
         const bytes = new Uint8Array(await file.arrayBuffer());
 
         await emit("tray-pdf-dropped", {
-          projectId: job.projectId,
+          projectId: selectedProject.id,
           fileName: file.name,
           bytesBase64: uint8ArrayToBase64(bytes),
         });
@@ -89,7 +111,7 @@ export function TrayDropZone() {
         if (granted) {
           sendNotification({
             title: "Wrapkit",
-            body: `${file.name} added to ${job.projectLabel}`,
+            body: `${file.name} added to ${selectedProject.label}`,
           });
         }
 
@@ -109,7 +131,7 @@ export function TrayDropZone() {
         }, 4000);
       }
     },
-    [job, hideWindow]
+    [selectedProject, hideWindow]
   );
 
   const handleDrop = useCallback(
@@ -132,19 +154,28 @@ export function TrayDropZone() {
   );
 
   return (
-    <div className={styles.container}>
+    <div className={styles.wrapper}>
+      <div className={styles.arrow} />
+      <div className={styles.container}>
+
       <div className={styles.header}>
-        <span className={styles.jobName}>
-          {job?.projectLabel ?? "Select a job…"}
-        </span>
-        <button
-          type="button"
-          className={styles.closeBtn}
-          onClick={() => void hideWindow()}
-          title="Close"
+        <select
+          className={styles.jobSelect}
+          value={selectedProject?.id ?? ""}
+          onChange={(e) => {
+            const proj = projects.find((p) => p.id === e.target.value);
+            if (proj) setSelectedProject(proj);
+          }}
         >
-          ×
-        </button>
+          {projects.length === 0 && (
+            <option value="" disabled>No jobs</option>
+          )}
+          {projects.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.label || "Untitled"}
+            </option>
+          ))}
+        </select>
       </div>
 
       <div
@@ -176,6 +207,7 @@ export function TrayDropZone() {
         {status === "error" && (
           <span className={styles.statusText}>{statusMessage}</span>
         )}
+      </div>
       </div>
     </div>
   );

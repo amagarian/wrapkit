@@ -1,10 +1,11 @@
 import { TrayIcon } from "@tauri-apps/api/tray";
-import { Menu, MenuItem, PredefinedMenuItem } from "@tauri-apps/api/menu";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { emit } from "@tauri-apps/api/event";
 import { Image } from "@tauri-apps/api/image";
+import { PhysicalPosition } from "@tauri-apps/api/dpi";
 
 let trayInstance: TrayIcon | null = null;
+const DROP_ZONE_WIDTH = 260;
 
 async function loadTrayIcon(): Promise<Image> {
   const response = await fetch("/icons/tray-icon.png");
@@ -12,14 +13,22 @@ async function loadTrayIcon(): Promise<Image> {
   return Image.fromBytes(new Uint8Array(buffer));
 }
 
-async function showDropZone(projectId: string, projectLabel: string) {
-  await emit("tray-job-selected", { projectId, projectLabel });
+async function toggleDropZone(iconX: number, iconY: number, iconWidth: number, iconHeight: number) {
+  const win = await WebviewWindow.getByLabel("dropzone");
+  if (!win) return;
 
-  const existing = await WebviewWindow.getByLabel("dropzone");
-  if (existing) {
-    await existing.show();
-    await existing.setFocus();
+  const isVisible = await win.isVisible();
+  if (isVisible) {
+    await win.hide();
+    return;
   }
+
+  const x = Math.round(iconX + iconWidth / 2 - DROP_ZONE_WIDTH / 2);
+  const y = Math.round(iconY + iconHeight + 4);
+
+  await win.setPosition(new PhysicalPosition(x, y));
+  await win.show();
+  await win.setFocus();
 }
 
 export async function initTray(
@@ -28,66 +37,33 @@ export async function initTray(
   if (trayInstance) return;
 
   const icon = await loadTrayIcon();
-  const menu = await buildJobMenu(projects);
+
+  await emit("tray-projects-sync", projects);
 
   trayInstance = await TrayIcon.new({
     id: "wrapkit-tray",
     icon,
     iconAsTemplate: true,
     tooltip: "Wrapkit — Drop PDFs",
-    menu,
-    menuOnLeftClick: true,
+    showMenuOnLeftClick: false,
+    action: (event) => {
+      if (event.type === "Click" && event.button === "Left") {
+        const rect = event.rect;
+        void toggleDropZone(
+          rect.position.x,
+          rect.position.y,
+          rect.size.width,
+          rect.size.height
+        );
+      }
+    },
   });
-}
-
-async function buildJobMenu(
-  projects: { id: string; label: string }[]
-): Promise<Menu> {
-  const items: (MenuItem | PredefinedMenuItem)[] = [];
-
-  for (const project of projects) {
-    const item = await MenuItem.new({
-      id: `tray-job-${project.id}`,
-      text: project.label || "Untitled",
-      action: () => {
-        void showDropZone(project.id, project.label || "Untitled");
-      },
-    });
-    items.push(item);
-  }
-
-  if (projects.length === 0) {
-    items.push(
-      await MenuItem.new({
-        id: "tray-no-jobs",
-        text: "No jobs yet",
-        enabled: false,
-      })
-    );
-  }
-
-  items.push(await PredefinedMenuItem.new({ item: "Separator" }));
-
-  items.push(
-    await MenuItem.new({
-      id: "tray-quit",
-      text: "Quit Wrapkit",
-      action: async () => {
-        const { exit } = await import("@tauri-apps/plugin-process");
-        await exit(0);
-      },
-    })
-  );
-
-  return Menu.new({ items });
 }
 
 export async function updateTrayMenu(
   projects: { id: string; label: string }[]
 ): Promise<void> {
-  if (!trayInstance) return;
-  const menu = await buildJobMenu(projects);
-  await trayInstance.setMenu(menu);
+  await emit("tray-projects-sync", projects);
 }
 
 export async function destroyTray(): Promise<void> {
