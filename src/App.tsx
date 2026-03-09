@@ -280,9 +280,14 @@ function MainApp() {
         showMatchModal?: boolean;
         autoFillVerified?: boolean;
         silentToasts?: boolean;
+        overrideProjectId?: string;
       } = {}
     ): Promise<"verified-filled" | "verified-ready" | "possible" | "draft"> => {
-      if (!selectedProjectId || !selectedProject) {
+      const effectiveProjectId = options.overrideProjectId ?? selectedProjectId;
+      const effectiveProject = effectiveProjectId
+        ? projects.find((p) => p.id === effectiveProjectId) ?? selectedProject
+        : selectedProject;
+      if (!effectiveProjectId || !effectiveProject) {
         return "draft";
       }
 
@@ -290,16 +295,16 @@ function MainApp() {
       const now = new Date().toISOString();
       const newDoc: ProjectDocument = {
         id: docId,
-        projectId: selectedProjectId,
+        projectId: effectiveProjectId,
         fileName: file.name,
         status: "pending",
         createdAt: now,
         updatedAt: now,
       };
-      addDocumentToProject(selectedProjectId, newDoc);
+      addDocumentToProject(effectiveProjectId, newDoc);
 
       const bytes = new Uint8Array(await file.arrayBuffer());
-      updateDocumentInProject(selectedProjectId, docId, { pdfBytes: bytes });
+      updateDocumentInProject(effectiveProjectId, docId, { pdfBytes: bytes });
 
       if (options.showMatchModal !== false) {
         setActiveDocumentId(docId);
@@ -321,14 +326,14 @@ function MainApp() {
         const templateId = result.verifiedMatch?.templateId;
         const template = templateId ? registryMatch.templatesById[templateId] : null;
 
-        updateDocumentInProject(selectedProjectId, docId, {
+        updateDocumentInProject(effectiveProjectId, docId, {
           status: "matched",
           matchResult: result,
           templateId,
         });
 
         if (template) {
-          autoFillDocument(template, docId, selectedProjectId);
+          autoFillDocument(template, docId, effectiveProjectId);
         }
 
         if (options.showMatchModal !== false) {
@@ -338,14 +343,14 @@ function MainApp() {
         if (result.kind === "verified" && options.autoFillVerified) {
           if (template && getPromptFields(template).length === 0) {
             try {
-              const filledBytes = await writeFilledPdfBytes(bytes, template, selectedProject, {
+              const filledBytes = await writeFilledPdfBytes(bytes, template, effectiveProject, {
                 defaultFontSize: 10,
               });
               const baseName = file.name.replace(/\.pdf$/i, "");
               const suggested = `${baseName} - FILLED.pdf`;
               const res = await exportPdfBytes(filledBytes, suggested, "downloads");
               if (!res.canceled) {
-                updateDocumentInProject(selectedProjectId, docId, {
+                updateDocumentInProject(effectiveProjectId, docId, {
                   status: "filled",
                   updatedAt: new Date().toISOString(),
                 });
@@ -401,12 +406,12 @@ function MainApp() {
         if (options.showMatchModal !== false) {
           setMatchModal(result);
         }
-        updateDocumentInProject(selectedProjectId, docId, {
+        updateDocumentInProject(effectiveProjectId, docId, {
           status: "matched",
           matchResult: result,
           templateId: savedLocalTemplate.id,
         });
-        autoFillDocument(savedLocalTemplate, docId, selectedProjectId);
+        autoFillDocument(savedLocalTemplate, docId, effectiveProjectId);
         if (!options.silentToasts) {
           showToast("Auto-filled with your saved local template.", "success");
         }
@@ -417,7 +422,7 @@ function MainApp() {
       let detectionMethod: "ai" | "heuristic" | "none" = "none";
 
       const setDocProcessing = (msg: string) => {
-        updateDocumentInProject(selectedProjectId, docId, {
+        updateDocumentInProject(effectiveProjectId, docId, {
           status: "processing",
           processingMessage: msg,
         });
@@ -469,12 +474,12 @@ function MainApp() {
       if (options.showMatchModal !== false) {
         setMatchModal(result);
       }
-      updateDocumentInProject(selectedProjectId, docId, {
+      updateDocumentInProject(effectiveProjectId, docId, {
         status: "matched",
         matchResult: result,
         templateId: draft.id,
       });
-      autoFillDocument(draft, docId, selectedProjectId);
+      autoFillDocument(draft, docId, effectiveProjectId);
       if (!options.silentToasts) {
         const methodLabel = detectionMethod === "ai" ? "AI" : "auto";
         showToast(
@@ -489,6 +494,7 @@ function MainApp() {
     [
       addDocumentToProject,
       autoFillDocument,
+      projects,
       selectedProject,
       selectedProjectId,
       showToast,
@@ -519,15 +525,14 @@ function MainApp() {
 
         setSelectedProjectId(projectId);
 
-        setTimeout(() => {
-          const blob = new Blob([bytes], { type: "application/pdf" });
-          const file = new File([blob], fileName, { type: "application/pdf" });
-          void processDroppedPdfRef.current(file, {
-            showMatchModal: false,
-            autoFillVerified: true,
-            silentToasts: true,
-          });
-        }, 150);
+        const blob = new Blob([bytes], { type: "application/pdf" });
+        const file = new File([blob], fileName, { type: "application/pdf" });
+        void processDroppedPdfRef.current(file, {
+          showMatchModal: false,
+          autoFillVerified: true,
+          silentToasts: true,
+          overrideProjectId: projectId,
+        });
       });
     };
 
