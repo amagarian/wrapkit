@@ -47,7 +47,11 @@ export async function initTray(
     tooltip: "Wrapkit — Drop PDFs",
     showMenuOnLeftClick: false,
     action: (event) => {
-      if (event.type === "Click" && event.button === "Left") {
+      if (
+        event.type === "Click" &&
+        event.button === "Left" &&
+        event.buttonState === "Up"
+      ) {
         const rect = event.rect;
         void toggleDropZone(
           rect.position.x,

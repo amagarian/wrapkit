@@ -41,16 +41,12 @@ export function TrayDropZone() {
 
   useEffect(() => {
     const win = getCurrentWebviewWindow();
-    const handleBlur = () => {
-      if (status === "processing") return;
-      setTimeout(async () => {
-        const focused = await win.isFocused();
-        if (!focused) await win.hide();
-      }, 200);
-    };
-
     const unlisten = win.onFocusChanged(({ payload: focused }) => {
-      if (!focused) handleBlur();
+      if (focused || status === "processing") return;
+      setTimeout(async () => {
+        const stillFocused = await win.isFocused();
+        if (!stillFocused) await win.hide();
+      }, 500);
     });
     return () => { void unlisten.then((fn) => fn()); };
   }, [status]);
