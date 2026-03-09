@@ -1,10 +1,11 @@
 import { TrayIcon } from "@tauri-apps/api/tray";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { emit } from "@tauri-apps/api/event";
+import { emitTo } from "@tauri-apps/api/event";
 import { Image } from "@tauri-apps/api/image";
 import { PhysicalPosition } from "@tauri-apps/api/dpi";
 
 let trayInstance: TrayIcon | null = null;
+let cachedProjects: { id: string; label: string }[] = [];
 const DROP_ZONE_WIDTH = 260;
 
 async function loadTrayIcon(): Promise<Image> {
@@ -27,6 +28,7 @@ async function toggleDropZone(iconX: number, iconY: number, iconWidth: number, i
   const y = Math.round(iconY + iconHeight + 4);
 
   await win.setPosition(new PhysicalPosition(x, y));
+  await emitTo("dropzone", "tray-projects-sync", cachedProjects);
   await win.show();
   await win.setFocus();
 }
@@ -36,9 +38,8 @@ export async function initTray(
 ): Promise<void> {
   if (trayInstance) return;
 
+  cachedProjects = projects;
   const icon = await loadTrayIcon();
-
-  await emit("tray-projects-sync", projects);
 
   trayInstance = await TrayIcon.new({
     id: "wrapkit-tray",
@@ -67,7 +68,7 @@ export async function initTray(
 export async function updateTrayMenu(
   projects: { id: string; label: string }[]
 ): Promise<void> {
-  await emit("tray-projects-sync", projects);
+  cachedProjects = projects;
 }
 
 export async function destroyTray(): Promise<void> {

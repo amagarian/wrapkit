@@ -6,7 +6,7 @@ import {
   requestPermission,
   sendNotification,
 } from "@tauri-apps/plugin-notification";
-import { emit } from "@tauri-apps/api/event";
+import { emitTo } from "@tauri-apps/api/event";
 import styles from "./TrayDropZone.module.css";
 
 type DropStatus = "idle" | "processing" | "done" | "error";
@@ -86,7 +86,7 @@ export function TrayDropZone() {
       try {
         const bytes = new Uint8Array(await file.arrayBuffer());
 
-        await emit("tray-pdf-dropped", {
+        await emitTo("main", "tray-pdf-dropped", {
           projectId: selectedProject.id,
           fileName: file.name,
           bytesBase64: uint8ArrayToBase64(bytes),
