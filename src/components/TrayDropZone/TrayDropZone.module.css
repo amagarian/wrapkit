@@ -1,0 +1,100 @@
+.container {
+  width: 100%;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06);
+  user-select: none;
+}
+
+.header {
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-app);
+}
+
+.jobName {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.closeBtn {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  border-radius: 4px;
+  padding: 0;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.closeBtn:hover {
+  color: var(--text);
+  background: var(--bg-input);
+}
+
+.dropArea {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px;
+  transition: background 0.15s;
+}
+
+.dropArea.dragOver {
+  background: rgba(66, 133, 244, 0.08);
+}
+
+.dropIcon {
+  font-size: 28px;
+  color: var(--text-muted);
+  line-height: 1;
+}
+
+.dropText {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.statusText {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  text-align: center;
+}
+
+.spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--border);
+  border-top-color: var(--text);
+  border-radius: 50%;
+  animation: processingSpinner 0.6s linear infinite;
+}
+
+.successIcon {
+  font-size: 24px;
+  color: #3a9a5c;
+}

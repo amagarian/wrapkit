@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import type { Project, PdfMatchResult, Template, TemplateCacheEntry, TemplateField, ProjectDocument } from "@/types";
 import { mockProjects } from "@/data/mockProjects";
 import { mockDraftTemplate } from "@/data/mockTemplates";
@@ -10,6 +10,7 @@ import { PreviewExportModal } from "@/components/PreviewExportModal/PreviewExpor
 import { FillPromptModal } from "@/components/FillPromptModal/FillPromptModal";
 import { MatchStatusModal } from "@/components/MatchStatusModal/MatchStatusModal";
 import { Toast, type ToastState } from "@/components/Toast/Toast";
+import { TrayDropZone } from "@/components/TrayDropZone/TrayDropZone";
 import {
   getPromptFields,
   type PromptFieldValues,
@@ -26,6 +27,19 @@ import {
   submitTemplateForVerification,
 } from "@/services/templateRegistry";
 import { readLocalTemplates, upsertLocalTemplate } from "@/services/templateCache";
+import { initTray, updateTrayMenu } from "@/utils/trayManager";
+
+function isDropZoneWindow(): boolean {
+  try {
+    const w = window as unknown as Record<string, unknown>;
+    const internals = w.__TAURI_INTERNALS__ as
+      | { metadata?: { currentWindow?: { label?: string } } }
+      | undefined;
+    return internals?.metadata?.currentWindow?.label === "dropzone";
+  } catch {
+    return false;
+  }
+}
 
 type View = "workspace" | "new-project" | "edit-project";
 
@@ -105,6 +119,14 @@ function cloneTemplate(template: Template): Template {
 }
 
 export default function App() {
+  if (isDropZoneWindow()) {
+    return <TrayDropZone />;
+  }
+
+  return <MainApp />;
+}
+
+function MainApp() {
   const [projects, setProjects] = useState<Project[]>(mockProjects);
   const [view, setView] = useState<View>("workspace");
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
@@ -168,6 +190,27 @@ export default function App() {
       setEditedTemplates(templatesToMap(localTemplates));
     }
   }, []);
+
+  const trayInitialized = useRef(false);
+  useEffect(() => {
+    if (trayInitialized.current) return;
+    trayInitialized.current = true;
+    const projectList = projects.map((p) => ({
+      id: p.id,
+      label: p.label || p.jobName || "Untitled",
+    }));
+    void initTray(projectList).catch((err) =>
+      console.warn("[Wrapkit] Tray init failed (expected in browser):", err)
+    );
+  }, []);
+
+  useEffect(() => {
+    const projectList = projects.map((p) => ({
+      id: p.id,
+      label: p.label || p.jobName || "Untitled",
+    }));
+    void updateTrayMenu(projectList).catch(() => {});
+  }, [projects]);
 
   const updateProject = useCallback((id: string, updates: Partial<Project>) => {
     setProjects((prev) =>
@@ -452,6 +495,51 @@ export default function App() {
       updateDocumentInProject,
     ]
   );
+
+  const processDroppedPdfRef = useRef(processDroppedPdf);
+  processDroppedPdfRef.current = processDroppedPdf;
+
+  useEffect(() => {
+    let cancelled = false;
+    const setupListener = async () => {
+      const { listen } = await import("@tauri-apps/api/event");
+      return listen<{
+        projectId: string;
+        fileName: string;
+        bytesBase64: string;
+      }>("tray-pdf-dropped", (event) => {
+        if (cancelled) return;
+        const { projectId, fileName, bytesBase64 } = event.payload;
+
+        const binary = atob(bytesBase64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+
+        setSelectedProjectId(projectId);
+
+        setTimeout(() => {
+          const blob = new Blob([bytes], { type: "application/pdf" });
+          const file = new File([blob], fileName, { type: "application/pdf" });
+          void processDroppedPdfRef.current(file, {
+            showMatchModal: false,
+            autoFillVerified: true,
+            silentToasts: true,
+          });
+        }, 150);
+      });
+    };
+
+    let unlisten: (() => void) | undefined;
+    setupListener()
+      .then((fn) => { if (!cancelled) unlisten = fn; })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
 
   const handlePdfDrop = useCallback(
     (files: File[] | null) => {
