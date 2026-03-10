@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import type { Template, TemplateField, Project, TemplateMappedProjectKey } from "@/types";
 import { PdfPageCanvas } from "@/components/PdfPageCanvas/PdfPageCanvas";
 import { DraggableField } from "@/components/DraggableField/DraggableField";
-import { getTemplateFieldValue } from "@/utils/fill";
+import { getTemplateFieldValue, normalizeCardType } from "@/utils/fill";
 import styles from "./TemplateReviewModal.module.css";
 
 const PROJECT_KEY_LABELS: Record<string, string> = {
@@ -192,7 +192,8 @@ export function TemplateReviewModal({
                       f.fieldType === "checkbox" && onProjectChange
                         ? (value) => {
                             if (f.mappedProjectKey === "creditCardType") {
-                              onProjectChange({ creditCardType: value as Project["creditCardType"] });
+                              const normalized = normalizeCardType(value) || value;
+                              onProjectChange({ creditCardType: normalized as Project["creditCardType"] });
                             }
                           }
                         : undefined

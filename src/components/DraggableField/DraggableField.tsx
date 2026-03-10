@@ -1,5 +1,6 @@
 import { useRef, useCallback, useState } from "react";
 import type { TemplateField } from "@/types";
+import { normalizeCardType } from "@/utils/fill";
 import styles from "./DraggableField.module.css";
 
 interface DraggableFieldProps {
@@ -169,7 +170,12 @@ export function DraggableField({
     field.fieldType === "checkbox" ||
     field.fieldKind === "checkbox-group" ||
     field.fieldKind === "boolean-checkbox";
-  const isChecked = isCheckbox && projectValue === field.checkboxValue;
+  const isCreditCardCheckbox = isCheckbox && field.canonicalFieldId?.startsWith("creditCardType");
+  const isChecked = isCheckbox && (
+    isCreditCardCheckbox
+      ? normalizeCardType(projectValue ?? "") === normalizeCardType(field.checkboxValue ?? "")
+      : projectValue === field.checkboxValue
+  );
 
   // Checkbox fields render as click targets, but can also be dragged when selected
   if (isCheckbox) {

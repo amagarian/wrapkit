@@ -8,6 +8,7 @@ import {
   type GeometryCandidate,
 } from "@/utils/fieldDetector";
 import { CANONICAL_FIELD_DEFINITIONS } from "@/utils/fieldCatalog";
+import { normalizeCardType } from "@/utils/fill";
 
 interface AiIdentifiedField {
   canonicalFieldId: string | null;
@@ -869,7 +870,9 @@ function buildTemplateField(
     fieldType: aiField.fieldType === "checkbox" ? "checkbox" : "text",
     fieldKind: isBooleanCheckbox ? "boolean-checkbox" : (canonicalDef?.fieldKind ?? aiField.fieldKind ?? "text"),
     detectionSource: "text-line",
-    checkboxValue: aiField.checkboxValue ?? canonicalDef?.checkboxValue,
+    checkboxValue: isCardCheckbox
+      ? (normalizeCardType(aiField.checkboxValue ?? "") || canonicalDef?.checkboxValue)
+      : (aiField.checkboxValue ?? canonicalDef?.checkboxValue),
     groupId: aiField.groupId ?? canonicalDef?.groupId,
     promptLabel: (isBooleanCheckbox || isUnmappedText) ? fieldLabel : undefined,
     estimatedFontSize: estimatedFontSize ? Math.round(estimatedFontSize * 10) / 10 : undefined,

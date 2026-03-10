@@ -1,6 +1,6 @@
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import type { Project, Template, TemplateField } from "@/types";
-import { getTemplateFieldValue, repairTemplateMappings, type PromptFieldValues } from "@/utils/fill";
+import { getTemplateFieldValue, normalizeCardType, repairTemplateMappings, type PromptFieldValues } from "@/utils/fill";
 
 function isCheckboxField(field: TemplateField): boolean {
   return (
@@ -89,7 +89,7 @@ export async function writeFilledPdfBytes(
     if (isCheckboxField(field)) {
       const isCreditCardCheckbox = field.canonicalFieldId?.startsWith("creditCardType");
       const shouldCheck = isCreditCardCheckbox
-        ? field.checkboxValue && rawValue === field.checkboxValue
+        ? field.checkboxValue && normalizeCardType(rawValue) === normalizeCardType(field.checkboxValue)
         : rawValue === "yes";
 
       if (shouldCheck) {

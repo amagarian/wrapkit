@@ -1,7 +1,24 @@
-import type { Project, Template, TemplateField, TemplateMappedProjectKey } from "@/types";
+import type { CreditCardType, Project, Template, TemplateField, TemplateMappedProjectKey } from "@/types";
 import { CANONICAL_FIELD_DEFINITIONS } from "@/utils/fieldCatalog";
 
 export type PromptFieldValues = Record<string, string>;
+
+const CARD_TYPE_ALIASES: Record<string, CreditCardType> = {
+  visa: "visa",
+  mastercard: "mastercard",
+  "master card": "mastercard",
+  mc: "mastercard",
+  discover: "discover",
+  amex: "amex",
+  "american express": "amex",
+  americanexpress: "amex",
+};
+
+export function normalizeCardType(value: string): CreditCardType | "" {
+  if (!value) return "";
+  const key = value.trim().toLowerCase();
+  return CARD_TYPE_ALIASES[key] ?? "";
+}
 
 export interface FilledField {
   fieldId: string;

@@ -36,8 +36,12 @@ export async function exportPdfBytes(
       return { method: "tauri" };
     }
 
+    const { downloadDir, join } = await import("@tauri-apps/api/path");
+    const downloadsPath = await downloadDir();
+    const defaultPath = await join(downloadsPath, suggestedFileName);
+
     const path = await save({
-      defaultPath: suggestedFileName,
+      defaultPath,
       filters: [{ name: "PDF", extensions: ["pdf"] }],
     });
 
