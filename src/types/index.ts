@@ -113,6 +113,8 @@ export interface TemplateField {
   promptLabel?: string;
   /** True if field is in an optional/conditional section (e.g. "if applicable"). */
   optional?: boolean;
+  /** Estimated font size (pt) of the nearby label text, from PDF.js text items. */
+  estimatedFontSize?: number;
 }
 
 export type TemplateRegistrySource =

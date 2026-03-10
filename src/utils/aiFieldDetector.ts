@@ -832,7 +832,8 @@ function buildTemplateField(
   aiField: AiIdentifiedField,
   coords: { x: number; y: number; width: number; height: number },
   index: number,
-  pageNumber: number
+  pageNumber: number,
+  estimatedFontSize?: number
 ): TemplateField {
   const canonicalId = aiField.canonicalFieldId && VALID_CANONICAL_IDS.has(aiField.canonicalFieldId)
     ? (aiField.canonicalFieldId as CanonicalFieldId)
@@ -871,6 +872,7 @@ function buildTemplateField(
     checkboxValue: aiField.checkboxValue ?? canonicalDef?.checkboxValue,
     groupId: aiField.groupId ?? canonicalDef?.groupId,
     promptLabel: (isBooleanCheckbox || isUnmappedText) ? fieldLabel : undefined,
+    estimatedFontSize: estimatedFontSize ? Math.round(estimatedFontSize * 10) / 10 : undefined,
   };
 }
 
@@ -1139,7 +1141,6 @@ async function detectFieldsWithAzure(
     // Use label matching + geometry finding (handles labels-below-underlines)
     const match = findLabelInContext(aiField, context);
     if (!match) {
-      // Fall back to Azure's raw bounding box if label not found in PDF
       const bb = df.boundingBox;
       const coords = {
         x: bb.x * pageWidth,
@@ -1152,6 +1153,8 @@ async function detectFieldsWithAzure(
       continue;
     }
 
+    const azureLabelFontSize = match.labelItem?.height ?? match.line.height;
+
     const coords = findFillArea(match.line, match.labelItem, context, usedGeoIds);
     if (!coords) {
       const bb = df.boundingBox;
@@ -1162,11 +1165,10 @@ async function detectFieldsWithAzure(
         height: Math.max(bb.height * pageHeight, 12),
       };
       console.log(`[Wrapkit Azure] "${df.label}" → no fill area, using Azure box`);
-      templateFields.push(buildTemplateField(aiField, fallback, templateFields.length, pageNumber));
+      templateFields.push(buildTemplateField(aiField, fallback, templateFields.length, pageNumber, azureLabelFontSize));
       continue;
     }
 
-    // Clamp to page bounds
     coords.x = Math.max(0, coords.x);
     coords.y = Math.max(0, coords.y);
     if (coords.x + coords.width > pageWidth) {
@@ -1174,7 +1176,7 @@ async function detectFieldsWithAzure(
     }
 
     console.log(`[Wrapkit Azure] "${df.label}" → PDF.js (${Math.round(coords.x)}, ${Math.round(coords.y)}) ${Math.round(coords.width)}x${Math.round(coords.height)}`);
-    templateFields.push(buildTemplateField(aiField, coords, templateFields.length, pageNumber));
+    templateFields.push(buildTemplateField(aiField, coords, templateFields.length, pageNumber, azureLabelFontSize));
   }
 
   // Sweep for unclaimed checkboxes Azure may have missed
@@ -1583,6 +1585,7 @@ export async function detectFieldsWithAI(
   for (let i = 0; i < dedupedAiFields.length; i++) {
     const aiField = dedupedAiFields[i];
     let coords: { x: number; y: number; width: number; height: number } | null = null;
+    let labelFontSize: number | undefined;
 
     if (aiField.fieldType === "checkbox") {
       if (aiField.canonicalFieldId && cardPositions.has(aiField.canonicalFieldId)) {
@@ -1601,13 +1604,15 @@ export async function detectFieldsWithAI(
         continue;
       }
 
+      labelFontSize = match.labelItem?.height ?? match.line.height;
+
       coords = findFillArea(match.line, match.labelItem, context, usedGeoIds);
       if (!coords) {
         console.log(`[Wrapkit AI] Could not find fill area for: "${aiField.label}"`);
         continue;
       }
 
-      console.log(`[Wrapkit AI] Positioned "${aiField.label}" at (${Math.round(coords.x)}, ${Math.round(coords.y)}) ${Math.round(coords.width)}x${Math.round(coords.height)}`);
+      console.log(`[Wrapkit AI] Positioned "${aiField.label}" at (${Math.round(coords.x)}, ${Math.round(coords.y)}) ${Math.round(coords.width)}x${Math.round(coords.height)} labelFont=${labelFontSize?.toFixed(1)}`);
     }
 
     // Clamp to page bounds
@@ -1617,7 +1622,7 @@ export async function detectFieldsWithAI(
       coords.width = context.pageWidth - coords.x;
     }
 
-    templateFields.push(buildTemplateField(aiField, coords, i, pageNumber));
+    templateFields.push(buildTemplateField(aiField, coords, i, pageNumber, labelFontSize));
   }
 
   console.log(`[Wrapkit AI] Positioned ${templateFields.length}/${dedupedAiFields.length} fields using PDF.js`);

@@ -92,9 +92,6 @@ export function TemplateReviewModal({
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "z") {
-        return;
-      }
       const target = event.target as HTMLElement | null;
       const tagName = target?.tagName?.toLowerCase();
       const isEditable =
@@ -102,27 +99,42 @@ export function TemplateReviewModal({
         tagName === "textarea" ||
         tagName === "select" ||
         Boolean(target?.isContentEditable);
-      if (isEditable) {
+
+      if (
+        selectedFieldId &&
+        !isEditable &&
+        ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)
+      ) {
+        event.preventDefault();
+        const step = event.shiftKey ? 10 : 1;
+        const field = template.fields.find((f) => f.id === selectedFieldId);
+        if (!field) return;
+        const updates: Partial<TemplateField> = {};
+        if (event.key === "ArrowLeft") updates.x = Math.max(0, field.x - step);
+        if (event.key === "ArrowRight") updates.x = field.x + step;
+        if (event.key === "ArrowUp") updates.y = Math.max(0, field.y - step);
+        if (event.key === "ArrowDown") updates.y = field.y + step;
+        onBeginFieldEdit();
+        onFieldChange(selectedFieldId, updates);
         return;
       }
+
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "z") return;
+      if (isEditable) return;
       if (event.shiftKey) {
-        if (!canRedo) {
-          return;
-        }
+        if (!canRedo) return;
         event.preventDefault();
         onRedo();
         return;
       }
-      if (!canUndo) {
-        return;
-      }
+      if (!canUndo) return;
       event.preventDefault();
       onUndo();
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [canRedo, canUndo, onRedo, onUndo]);
+  }, [canRedo, canUndo, onRedo, onUndo, selectedFieldId, template.fields, onFieldChange, onBeginFieldEdit]);
 
   useEffect(() => {
     if (!selectedFieldId || !fieldListRef.current) return;

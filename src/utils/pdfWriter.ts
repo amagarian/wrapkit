@@ -113,7 +113,10 @@ export async function writeFilledPdfBytes(
         });
       }
     } else if (isSignatureField(field)) {
-      const sigFontSize = Math.max(10, Math.min(20, Math.floor(field.height * 0.85)));
+      const baseFontSize = field.estimatedFontSize
+        ? field.estimatedFontSize * 3
+        : Math.floor(field.height * 0.85);
+      const sigFontSize = Math.max(10, Math.min(28, baseFontSize));
       const value = fitTextToWidth(rawValue, field.width, signatureFont, sigFontSize);
 
       page.drawText(value, {
@@ -125,7 +128,9 @@ export async function writeFilledPdfBytes(
       });
     } else {
       let fontSize = defaultFontSize;
-      if (field.height > 0) {
+      if (field.estimatedFontSize) {
+        fontSize = Math.max(7, Math.min(16, Math.round(field.estimatedFontSize * 1.5)));
+      } else if (field.height > 0) {
         fontSize = Math.max(7, Math.min(12, Math.floor(field.height * 0.75)));
       }
 
