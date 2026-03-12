@@ -1050,7 +1050,7 @@ export async function _detectFieldsWithAzure(
 
   // Render image for Azure AND build PDF.js context for positioning in parallel
   const [base64, context] = await Promise.all([
-    renderPageToBase64(pdfBytes, pageNumber, 300),
+    renderPageToBase64(pdfBytes, pageNumber, 400),
     buildDetectionContext(pdfBytes, pageNumber),
   ]);
 
@@ -1208,7 +1208,7 @@ export async function _detectFieldsWithDocAI(
   console.log("[Wrapkit DocAI] Starting Document AI + Gemini hybrid detection...");
   onStatus?.("Rendering PDF…");
 
-  const base64 = await renderPageToBase64(pdfBytes, pageNumber, 300);
+  const base64 = await renderPageToBase64(pdfBytes, pageNumber, 400);
 
   onStatus?.("Analyzing form with Document AI…");
   const response = await callDocAIEdgeFunction(base64);
@@ -1312,11 +1312,13 @@ function findGeometryInRegion(
   context: DetectionContext,
   usedGeoIds: Set<string>
 ): { x: number; y: number; width: number; height: number } | null {
-  const tolerance = 25;
-  const regionLeft = geminiBox.x - tolerance;
-  const regionRight = geminiBox.x + geminiBox.width + tolerance;
-  const regionTop = geminiBox.y - tolerance;
-  const regionBottom = geminiBox.y + geminiBox.height + tolerance;
+  const hTolerance = 40;
+  const vTolerance = 35;
+  const regionLeft = geminiBox.x - hTolerance;
+  const regionRight = geminiBox.x + geminiBox.width + hTolerance;
+  const regionTop = geminiBox.y - vTolerance;
+  const regionBottom = geminiBox.y + geminiBox.height + vTolerance;
+  const geminiCenterY = geminiBox.y + geminiBox.height / 2;
 
   type ScoredGeo = { geo: GeometryCandidate; score: number };
   const candidates: ScoredGeo[] = [];
@@ -1324,36 +1326,40 @@ function findGeometryInRegion(
   for (const geo of context.geometryCandidates) {
     if (usedGeoIds.has(geo.id)) continue;
     if (geo.kind === "box") continue;
-    if (geo.width < 25) continue;
+    if (geo.width < 20) continue;
 
     const geoRight = geo.x + geo.width;
+    const geoCenterY = geo.y + geo.height / 2;
 
-    // Check if geometry overlaps with the expanded Gemini region
     const overlapX = Math.max(0, Math.min(geoRight, regionRight) - Math.max(geo.x, regionLeft));
-    const overlapY = geo.y >= regionTop && geo.y <= regionBottom;
+    const inVertRange = geoCenterY >= regionTop && geoCenterY <= regionBottom;
 
-    if (overlapX <= 0 || !overlapY) continue;
+    if (overlapX <= 0 || !inVertRange) continue;
 
     let score = 100;
-    // Prefer geometry with more horizontal overlap with Gemini box
-    score += (overlapX / Math.max(geo.width, 1)) * 40;
-    // Prefer geometry close in y to the Gemini box center
-    const yDist = Math.abs((geo.y + geo.height / 2) - (geminiBox.y + geminiBox.height / 2));
-    score -= yDist * 2;
-    // Prefer wider geometry (more likely to be a real fill area)
-    if (geo.width >= 50) score += 15;
-    if (geo.width >= 100) score += 10;
+
+    const overlapRatio = overlapX / Math.max(geo.width, 1);
+    score += overlapRatio * 50;
+
+    const yDist = Math.abs(geoCenterY - geminiCenterY);
+    score -= yDist * 1.5;
+
+    if (geo.width >= 50) score += 20;
+    if (geo.width >= 100) score += 15;
+    if (geo.width >= 200) score += 10;
+
+    if (geo.kind === "underline") score += 10;
 
     candidates.push({ geo, score });
   }
 
   candidates.sort((a, b) => b.score - a.score);
 
-  if (candidates.length > 0 && candidates[0].score > 60) {
+  if (candidates.length > 0 && candidates[0].score > 50) {
     const bestGeo = candidates[0].geo;
     usedGeoIds.add(bestGeo.id);
 
-    const baselinePad = bestGeo.kind === "underline" ? 12 : 4;
+    const baselinePad = bestGeo.kind === "underline" ? 14 : 4;
     const correctedY = Math.max(0, bestGeo.y - baselinePad);
     const geoBottom = bestGeo.y + bestGeo.height;
     const fieldHeight = Math.max(geoBottom - correctedY, 16);
@@ -1390,7 +1396,7 @@ export async function _detectFieldsWithGemini(
   onStatus?.("Rendering PDF…");
 
   const [base64, context] = await Promise.all([
-    renderPageToBase64(pdfBytes, pageNumber, 300),
+    renderPageToBase64(pdfBytes, pageNumber, 400),
     buildDetectionContext(pdfBytes, pageNumber),
   ]);
 
@@ -1567,7 +1573,7 @@ export async function detectFieldsWithAI(
   onStatus?.("Rendering PDF…");
 
   const [base64, context] = await Promise.all([
-    renderPageToBase64(pdfBytes, pageNumber, 300),
+    renderPageToBase64(pdfBytes, pageNumber, 400),
     buildDetectionContext(pdfBytes, pageNumber),
   ]);
 
