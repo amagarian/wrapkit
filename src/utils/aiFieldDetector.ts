@@ -321,7 +321,7 @@ async function renderPageToBase64(pdfBytes: Uint8Array, pageNumber: number, dpi:
   return base64;
 }
 
-async function callEdgeFunction(base64Image: string, fileName: string): Promise<AiDetectionResponse> {
+export async function _callEdgeFunction(base64Image: string, fileName: string): Promise<AiDetectionResponse> {
   const url = getEdgeFunctionUrl("v1");
   const anonKey = getSupabaseAnonKey();
 
@@ -887,7 +887,7 @@ function buildTemplateField(
 
 // --------------- Visual Geometry Matching detection ---------------
 
-async function detectFieldsWithVisualMatching(
+export async function _detectFieldsWithVisualMatching(
   pdfBytes: Uint8Array,
   pageNumber: number,
   onStatus?: (status: string) => void
@@ -1040,7 +1040,7 @@ async function detectFieldsWithVisualMatching(
 
 // --------------- Azure Document Intelligence detection ---------------
 
-async function detectFieldsWithAzure(
+export async function _detectFieldsWithAzure(
   pdfBytes: Uint8Array,
   pageNumber: number,
   onStatus?: (status: string) => void
@@ -1563,127 +1563,124 @@ export async function detectFieldsWithAI(
   pageNumber: number = 1,
   onStatus?: (status: string) => void
 ): Promise<TemplateField[]> {
-  // Tier 1: Visual Geometry Matching (GPT-4o Vision + numbered PDF.js markers)
-  try {
-    const visualFields = await detectFieldsWithVisualMatching(pdfBytes, pageNumber, onStatus);
-    if (visualFields.length > 0) {
-      console.log(`[Wrapkit AI] Visual matching succeeded with ${visualFields.length} fields`);
-      return refineFieldsWithEmbeddings(visualFields, onStatus);
-    }
-    console.log("[Wrapkit AI] Visual matching returned 0 fields, falling back…");
-  } catch (err) {
-    console.warn("[Wrapkit AI] Visual matching failed, falling back:", err);
-  }
-
-  // Tier 2: Azure Document Intelligence + Gemini
-  try {
-    const azureFields = await detectFieldsWithAzure(pdfBytes, pageNumber, onStatus);
-    if (azureFields.length > 0) {
-      console.log(`[Wrapkit AI] Azure succeeded with ${azureFields.length} fields`);
-      return refineFieldsWithEmbeddings(azureFields, onStatus);
-    }
-    console.log("[Wrapkit AI] Azure returned 0 fields, falling back…");
-  } catch (err) {
-    console.warn("[Wrapkit AI] Azure detection failed, falling back:", err);
-  }
-
-  // Tier 3: GPT-4o + PDF.js hybrid (final fallback)
-  console.log("[Wrapkit AI] Starting GPT-4o + PDF.js hybrid detection...");
+  console.log("[Wrapkit AI] Starting Gemini 2.5 Flash + Embedding 2 detection pipeline…");
   onStatus?.("Rendering PDF…");
 
   const [base64, context] = await Promise.all([
-    renderPageToBase64(pdfBytes, pageNumber),
+    renderPageToBase64(pdfBytes, pageNumber, 300),
     buildDetectionContext(pdfBytes, pageNumber),
   ]);
 
-  console.log("[Wrapkit AI] Rendered page, calling AI for field identification...");
-  console.log(`[Wrapkit AI] PDF.js found ${context.textLines.length} text lines, ${context.geometryCandidates.length} geometry candidates`);
-  onStatus?.("Identifying fields with AI…");
+  const pw = context.pageWidth;
+  const ph = context.pageHeight;
+  console.log(`[Wrapkit AI] Page: ${pw}x${ph}, ${context.textLines.length} lines, ${context.geometryCandidates.length} geometry`);
+  onStatus?.("Detecting fields with Gemini…");
 
-  const response = await callEdgeFunction(base64, "");
-
-  const aiFields = response.fields ?? [];
-  console.log(`[Wrapkit AI] AI identified ${aiFields.length} field(s)`);
+  const response = await callGeminiEdgeFunction(base64, "");
+  const geminiFields = response.fields ?? [];
+  console.log(`[Wrapkit AI] Gemini returned ${geminiFields.length} field(s)`);
   if (response.pageDescription) {
     console.log(`[Wrapkit AI] Form type: ${response.pageDescription}`);
   }
 
-  if (aiFields.length === 0) return [];
+  if (geminiFields.length === 0) return [];
 
-  onStatus?.("Mapping fields to PDF positions…");
+  onStatus?.("Aligning to PDF structure…");
 
-  // Pre-deduplicate AI fields by canonicalFieldId
   const seenCanonicalIds = new Set<string>();
-  const dedupedAiFields: AiIdentifiedField[] = [];
-  for (const field of aiFields) {
-    if (field.canonicalFieldId) {
-      if (seenCanonicalIds.has(field.canonicalFieldId)) {
-        console.log(`[Wrapkit AI] Skipping duplicate canonical ID: ${field.canonicalFieldId} ("${field.label}")`);
-        continue;
-      }
-      seenCanonicalIds.add(field.canonicalFieldId);
-    }
-    dedupedAiFields.push(field);
-  }
-
   const usedGeoIds = new Set<string>();
   const templateFields: TemplateField[] = [];
+  let snappedCount = 0;
+  let rawCount = 0;
 
-  // Batch-position all credit card type checkboxes first
-  const cardCheckboxFields = dedupedAiFields.filter(
-    (f) => f.fieldType === "checkbox" && f.canonicalFieldId && CREDIT_CARD_CHECKBOX_IDS.has(f.canonicalFieldId)
-  );
-  const cardPositions = positionCardTypeCheckboxes(cardCheckboxFields, context, usedGeoIds);
+  const checkboxGeminiFields = geminiFields.filter((gf) => gf.fieldType === "checkbox");
+  const textGeminiFields = geminiFields.filter((gf) => gf.fieldType !== "checkbox");
 
-  for (let i = 0; i < dedupedAiFields.length; i++) {
-    const aiField = dedupedAiFields[i];
+  const cardCheckboxAiFields = checkboxGeminiFields
+    .filter((gf) => gf.canonicalFieldId && CREDIT_CARD_CHECKBOX_IDS.has(gf.canonicalFieldId))
+    .map(geminiToAiField);
+  const cardPositions = positionCardTypeCheckboxes(cardCheckboxAiFields, context, usedGeoIds);
+
+  for (let i = 0; i < checkboxGeminiFields.length; i++) {
+    const gf = checkboxGeminiFields[i];
+    const aiField = geminiToAiField(gf);
+
+    if (gf.canonicalFieldId) {
+      if (seenCanonicalIds.has(gf.canonicalFieldId)) continue;
+      seenCanonicalIds.add(gf.canonicalFieldId);
+    }
+
     let coords: { x: number; y: number; width: number; height: number } | null = null;
-    let labelFontSize: number | undefined;
-
-    if (aiField.fieldType === "checkbox") {
-      if (aiField.canonicalFieldId && cardPositions.has(aiField.canonicalFieldId)) {
-        coords = cardPositions.get(aiField.canonicalFieldId)!;
-      } else {
-        coords = findCheckboxGeometry(aiField, context, usedGeoIds);
-      }
-      if (!coords) {
-        console.log(`[Wrapkit AI] Could not locate checkbox for: "${aiField.label}"`);
-        continue;
-      }
+    if (gf.canonicalFieldId && cardPositions.has(gf.canonicalFieldId)) {
+      coords = cardPositions.get(gf.canonicalFieldId)!;
     } else {
-      const match = findLabelInContext(aiField, context);
-      if (!match) {
-        console.log(`[Wrapkit AI] Could not locate label for: "${aiField.label}" (nearbyText: "${aiField.nearbyText}")`);
-        continue;
-      }
-
-      labelFontSize = match.labelItem?.height ?? match.line.height;
-
-      coords = findFillArea(match.line, match.labelItem, context, usedGeoIds);
-      if (!coords) {
-        console.log(`[Wrapkit AI] Could not find fill area for: "${aiField.label}"`);
-        continue;
-      }
-
-      console.log(`[Wrapkit AI] Positioned "${aiField.label}" at (${Math.round(coords.x)}, ${Math.round(coords.y)}) ${Math.round(coords.width)}x${Math.round(coords.height)} labelFont=${labelFontSize?.toFixed(1)}`);
+      coords = findCheckboxGeometry(aiField, context, usedGeoIds);
     }
+    if (!coords) continue;
 
-    // Clamp to page bounds
-    if (coords.x < 0) coords.x = 0;
-    if (coords.y < 0) coords.y = 0;
-    if (coords.x + coords.width > context.pageWidth) {
-      coords.width = context.pageWidth - coords.x;
-    }
-
-    templateFields.push(buildTemplateField(aiField, coords, i, pageNumber, labelFontSize));
+    templateFields.push(buildTemplateField(aiField, coords, templateFields.length, pageNumber));
   }
 
-  console.log(`[Wrapkit AI] Positioned ${templateFields.length}/${dedupedAiFields.length} fields using PDF.js`);
+  for (let i = 0; i < textGeminiFields.length; i++) {
+    const gf = textGeminiFields[i];
 
-  const supplementalCheckboxes = detectUnclaimedCheckboxes(context, usedGeoIds, pageNumber, templateFields.length);
-  if (supplementalCheckboxes.length > 0) {
-    console.log(`[Wrapkit AI] Found ${supplementalCheckboxes.length} additional checkbox(es) from geometry sweep`);
-    templateFields.push(...supplementalCheckboxes);
+    if (gf.canonicalFieldId) {
+      if (seenCanonicalIds.has(gf.canonicalFieldId)) {
+        console.log(`[Wrapkit AI] Skipping duplicate: ${gf.canonicalFieldId}`);
+        continue;
+      }
+      seenCanonicalIds.add(gf.canonicalFieldId);
+    }
+
+    const [yMin, xMin, yMax, xMax] = gf.box_2d;
+    const geminiBox = {
+      x: (xMin / 1000) * pw,
+      y: (yMin / 1000) * ph,
+      width: Math.max(((xMax - xMin) / 1000) * pw, 10),
+      height: Math.max(((yMax - yMin) / 1000) * ph, 10),
+    };
+
+    const snappedCoords = findGeometryInRegion(geminiBox, context, usedGeoIds);
+
+    let finalCoords: { x: number; y: number; width: number; height: number };
+    if (snappedCoords) {
+      finalCoords = snappedCoords;
+      snappedCount++;
+    } else {
+      finalCoords = {
+        x: geminiBox.x,
+        y: Math.max(0, geminiBox.y - 2),
+        width: geminiBox.width,
+        height: Math.max(geminiBox.height + 4, 16),
+      };
+      rawCount++;
+    }
+
+    finalCoords.x = Math.max(0, finalCoords.x);
+    finalCoords.y = Math.max(0, finalCoords.y);
+    if (finalCoords.x + finalCoords.width > pw) {
+      finalCoords.width = pw - finalCoords.x;
+    }
+
+    const aiField = geminiToAiField(gf);
+    const labelMatch = findLabelInContext(aiField, context);
+    const labelFontSize = labelMatch
+      ? (labelMatch.labelItem?.height ?? labelMatch.line.height)
+      : undefined;
+
+    const field = buildTemplateField(aiField, finalCoords, templateFields.length, pageNumber, labelFontSize);
+    console.log(
+      `[Wrapkit AI] "${field.label}" → (${Math.round(finalCoords.x)}, ${Math.round(finalCoords.y)}) ${Math.round(finalCoords.width)}x${Math.round(finalCoords.height)} [${snappedCoords ? "snapped" : "raw"}]`
+    );
+    templateFields.push(field);
+  }
+
+  console.log(`[Wrapkit AI] Produced ${templateFields.length} fields (${snappedCount} snapped, ${rawCount} raw)`);
+
+  const supplemental = detectUnclaimedCheckboxes(context, usedGeoIds, pageNumber, templateFields.length);
+  if (supplemental.length > 0) {
+    console.log(`[Wrapkit AI] Found ${supplemental.length} additional checkbox(es)`);
+    templateFields.push(...supplemental);
   }
 
   const deduped = dedupeFields(templateFields);
