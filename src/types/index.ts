@@ -142,6 +142,10 @@ export interface TemplateFingerprint {
   canonicalFieldIds: CanonicalFieldId[];
   fileNameHints: string[];
   fingerprintHash: string;
+  /** Gemini Embedding 2 vector (768-d) for semantic template matching */
+  embedding?: number[];
+  /** Classified form type from document embedding */
+  formType?: string;
 }
 
 /** A saved template (local or verified) */

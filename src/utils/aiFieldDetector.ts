@@ -9,6 +9,11 @@ import {
 } from "@/utils/fieldDetector";
 import { CANONICAL_FIELD_DEFINITIONS } from "@/utils/fieldCatalog";
 import { normalizeCardType } from "@/utils/fill";
+import {
+  embedFieldLabels,
+  getCanonicalFieldEmbeddings,
+  findBestCanonicalMatch,
+} from "@/utils/embeddings";
 
 interface AiIdentifiedField {
   canonicalFieldId: string | null;
@@ -1508,6 +1513,51 @@ export async function _detectFieldsWithGemini(
   return dedupeFields(templateFields);
 }
 
+async function refineFieldsWithEmbeddings(
+  fields: TemplateField[],
+  onStatus?: (status: string) => void
+): Promise<TemplateField[]> {
+  const unmappedFields = fields.filter(
+    (f) => !f.canonicalFieldId && f.fieldType !== "checkbox" && f.label
+  );
+  if (unmappedFields.length === 0) return fields;
+
+  try {
+    onStatus?.("Refining field labels with embeddings…");
+    console.log(`[Wrapkit Embed] Refining ${unmappedFields.length} unmapped field(s) via semantic matching…`);
+
+    const canonicalEmbeddings = await getCanonicalFieldEmbeddings();
+    const labels = unmappedFields.map((f) => f.label);
+    const labelEmbeddings = await embedFieldLabels(labels);
+
+    const usedIds = new Set(
+      fields.map((f) => f.canonicalFieldId).filter(Boolean) as string[]
+    );
+
+    let remapped = 0;
+    for (let i = 0; i < unmappedFields.length; i++) {
+      const match = findBestCanonicalMatch(labelEmbeddings[i], canonicalEmbeddings, 0.70);
+      if (match && !usedIds.has(match.id)) {
+        const field = unmappedFields[i];
+        const canonicalDef = CANONICAL_FIELD_DEFINITIONS.find((d) => d.id === match.id);
+        if (canonicalDef) {
+          field.canonicalFieldId = match.id as CanonicalFieldId;
+          field.mappedProjectKey = (canonicalDef.mappedProjectKey || "") as TemplateField["mappedProjectKey"];
+          if (canonicalDef.fieldKind) field.fieldKind = canonicalDef.fieldKind;
+          usedIds.add(match.id);
+          remapped++;
+          console.log(`[Wrapkit Embed] "${field.label}" → ${match.id} (similarity: ${match.similarity.toFixed(3)})`);
+        }
+      }
+    }
+    console.log(`[Wrapkit Embed] Remapped ${remapped}/${unmappedFields.length} unmapped fields via embeddings`);
+  } catch (err) {
+    console.warn("[Wrapkit Embed] Embedding-based refinement failed (non-fatal):", err);
+  }
+
+  return fields;
+}
+
 export async function detectFieldsWithAI(
   pdfBytes: Uint8Array,
   pageNumber: number = 1,
@@ -1518,7 +1568,7 @@ export async function detectFieldsWithAI(
     const visualFields = await detectFieldsWithVisualMatching(pdfBytes, pageNumber, onStatus);
     if (visualFields.length > 0) {
       console.log(`[Wrapkit AI] Visual matching succeeded with ${visualFields.length} fields`);
-      return visualFields;
+      return refineFieldsWithEmbeddings(visualFields, onStatus);
     }
     console.log("[Wrapkit AI] Visual matching returned 0 fields, falling back…");
   } catch (err) {
@@ -1530,7 +1580,7 @@ export async function detectFieldsWithAI(
     const azureFields = await detectFieldsWithAzure(pdfBytes, pageNumber, onStatus);
     if (azureFields.length > 0) {
       console.log(`[Wrapkit AI] Azure succeeded with ${azureFields.length} fields`);
-      return azureFields;
+      return refineFieldsWithEmbeddings(azureFields, onStatus);
     }
     console.log("[Wrapkit AI] Azure returned 0 fields, falling back…");
   } catch (err) {
@@ -1636,7 +1686,8 @@ export async function detectFieldsWithAI(
     templateFields.push(...supplementalCheckboxes);
   }
 
-  return dedupeFields(templateFields);
+  const deduped = dedupeFields(templateFields);
+  return refineFieldsWithEmbeddings(deduped, onStatus);
 }
 
 /**

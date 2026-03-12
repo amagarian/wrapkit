@@ -1,5 +1,6 @@
 import * as pdfjsLib from "pdfjs-dist";
 import type { CanonicalFieldId, Template, TemplateFingerprint } from "@/types";
+import { embedDocument, classifyFormType } from "@/utils/embeddings";
 
 interface TextItem {
   str: string;
@@ -106,6 +107,20 @@ export async function buildPdfFingerprint(
     })
   );
 
+  let embedding: number[] | undefined;
+  let formType: string | undefined;
+  try {
+    const base64 = uint8ArrayToBase64(bytesCopy);
+    embedding = await embedDocument(base64);
+    if (embedding && embedding.length > 0) {
+      const classification = await classifyFormType(embedding);
+      formType = classification.type;
+      console.log(`[Wrapkit Embed] Form classified as "${formType}" (confidence: ${classification.confidence.toFixed(3)})`);
+    }
+  } catch (err) {
+    console.warn("[Wrapkit Embed] Document embedding failed, falling back to token-only fingerprint:", err);
+  }
+
   return {
     version: 1,
     pageCount: pdf.numPages,
@@ -115,7 +130,17 @@ export async function buildPdfFingerprint(
     canonicalFieldIds: [],
     fileNameHints,
     fingerprintHash,
+    embedding,
+    formType,
   };
+}
+
+function uint8ArrayToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
 }
 
 export function buildTemplateFingerprintFromTemplate(template: Template, fileName?: string): TemplateFingerprint {
@@ -170,6 +195,8 @@ export function buildTemplateFingerprintFromTemplate(template: Template, fileNam
         })),
       })
     ),
+    embedding: template.fingerprint?.embedding,
+    formType: template.fingerprint?.formType,
   };
 }
 
@@ -185,7 +212,7 @@ function overlapScore(left: string[], right: string[]): number {
 export function scoreFingerprintMatch(
   incoming: TemplateFingerprint,
   candidate: TemplateFingerprint
-): { total: number; detail: { page: number; anchors: number; fileName: number; checkbox: number } } {
+): { total: number; detail: { page: number; anchors: number; fileName: number; checkbox: number; semantic: number } } {
   const pageScore =
     incoming.pageCount === candidate.pageCount
       ? 1
@@ -194,7 +221,17 @@ export function scoreFingerprintMatch(
   const fileNameScore = overlapScore(incoming.fileNameHints, candidate.fileNameHints);
   const checkboxScore = overlapScore(incoming.checkboxTerms, candidate.checkboxTerms);
 
-  const total = pageScore * 0.34 + anchorScore * 0.46 + fileNameScore * 0.12 + checkboxScore * 0.08;
+  let semanticScore = 0;
+  if (incoming.embedding && candidate.embedding) {
+    semanticScore = embeddingCosineSimilarity(incoming.embedding, candidate.embedding);
+    semanticScore = Math.max(0, semanticScore);
+  }
+
+  const hasEmbeddings = !!(incoming.embedding && candidate.embedding);
+  const total = hasEmbeddings
+    ? pageScore * 0.20 + anchorScore * 0.28 + semanticScore * 0.38 + fileNameScore * 0.08 + checkboxScore * 0.06
+    : pageScore * 0.34 + anchorScore * 0.46 + fileNameScore * 0.12 + checkboxScore * 0.08;
+
   return {
     total,
     detail: {
@@ -202,6 +239,21 @@ export function scoreFingerprintMatch(
       anchors: anchorScore,
       fileName: fileNameScore,
       checkbox: checkboxScore,
+      semantic: semanticScore,
     },
   };
+}
+
+function embeddingCosineSimilarity(a: number[], b: number[]): number {
+  if (a.length !== b.length || a.length === 0) return 0;
+  let dot = 0;
+  let magA = 0;
+  let magB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    magA += a[i] * a[i];
+    magB += b[i] * b[i];
+  }
+  const denom = Math.sqrt(magA) * Math.sqrt(magB);
+  return denom === 0 ? 0 : dot / denom;
 }

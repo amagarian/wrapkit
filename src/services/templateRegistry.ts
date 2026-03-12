@@ -233,7 +233,7 @@ function rankTemplateCandidates(
     console.log(
       `[Wrapkit] Match candidate "${entry.template.name}" (${entry.source}): ` +
       `confidence=${confidence.toFixed(3)} [page=${detail.page.toFixed(2)} anchors=${detail.anchors.toFixed(2)} ` +
-      `fileName=${detail.fileName.toFixed(2)} checkbox=${detail.checkbox.toFixed(2)} nameBonus=${nameBonus}]`
+      `semantic=${detail.semantic.toFixed(2)} fileName=${detail.fileName.toFixed(2)} checkbox=${detail.checkbox.toFixed(2)} nameBonus=${nameBonus}]`
     );
     return { entry, confidence };
   });
